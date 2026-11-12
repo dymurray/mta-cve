@@ -1,0 +1,140 @@
+# Realm "trustify": mirrors the upstream trustify-infrastructure post-install
+# job (roles, document scopes, frontend + cli clients, admin user) as a
+# declarative RHBK realm import.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: KeycloakRealmImport
+metadata:
+  name: trustify
+  namespace: trusted-profile-analyzer
+spec:
+  keycloakCRName: sso
+  placeholders:
+    CLI_SECRET:
+      secret: {name: oidc-cli, key: client-secret}
+    TPA_ADMIN_PASSWORD:
+      secret: {name: rhtpa-admin, key: password}
+  realm:
+    realm: trustify
+    displayName: Trusted Profile Analyzer
+    enabled: true
+    registrationAllowed: false
+    resetPasswordAllowed: true
+    loginWithEmailAllowed: false
+    roles:
+      realm:
+        - name: trustify-user
+        - name: trustify-manager
+        - name: trustify-admin
+    defaultRole:
+      name: default-roles-trustify
+      composite: true
+      composites:
+        realm: [offline_access, uma_authorization, trustify-user]
+    clientScopes:
+      - name: read:document
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+      - name: create:document
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+      - name: update:document
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+      - name: delete:document
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+      - name: basic
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "false"}
+        protocolMappers:
+          - name: sub
+            protocol: openid-connect
+            protocolMapper: oidc-sub-mapper
+            config: {access.token.claim: "true", introspection.token.claim: "true"}
+          - name: auth_time
+            protocol: openid-connect
+            protocolMapper: oidc-usersessionmodel-note-mapper
+            config: {user.session.note: AUTH_TIME, claim.name: auth_time, jsonType.label: long, id.token.claim: "true", access.token.claim: "true"}
+      - name: profile
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+        protocolMappers:
+          - name: username
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            config: {user.attribute: username, claim.name: preferred_username, jsonType.label: String, id.token.claim: "true", access.token.claim: "true", userinfo.token.claim: "true"}
+          - name: full name
+            protocol: openid-connect
+            protocolMapper: oidc-full-name-mapper
+            config: {id.token.claim: "true", access.token.claim: "true", userinfo.token.claim: "true"}
+      - name: email
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "true"}
+        protocolMappers:
+          - name: email
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-attribute-mapper
+            config: {user.attribute: email, claim.name: email, jsonType.label: String, id.token.claim: "true", access.token.claim: "true", userinfo.token.claim: "true"}
+      - name: roles
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "false"}
+        protocolMappers:
+          - name: realm roles
+            protocol: openid-connect
+            protocolMapper: oidc-usermodel-realm-role-mapper
+            config: {claim.name: realm_access.roles, jsonType.label: String, multivalued: "true", access.token.claim: "true"}
+      - name: web-origins
+        protocol: openid-connect
+        attributes: {include.in.token.scope: "false"}
+        protocolMappers:
+          - name: allowed web origins
+            protocol: openid-connect
+            protocolMapper: oidc-allowed-origins-mapper
+            config: {access.token.claim: "true"}
+    # Only trustify-manager holders receive the write scopes.
+    scopeMappings:
+      - clientScope: create:document
+        roles: [trustify-manager]
+      - clientScope: update:document
+        roles: [trustify-manager]
+      - clientScope: delete:document
+        roles: [trustify-manager]
+    clients:
+      - clientId: frontend
+        enabled: true
+        publicClient: true
+        standardFlowEnabled: true
+        implicitFlowEnabled: true
+        directAccessGrantsEnabled: false
+        fullScopeAllowed: true
+        redirectUris: ["https://server-trusted-profile-analyzer.apps.mta-cve.mg.dog8code.com/*"]
+        webOrigins: ["*"]
+        attributes: {post.logout.redirect.uris: "+", access.token.lifespan: "300"}
+        defaultClientScopes: [basic, email, profile, roles, web-origins, read:document, create:document, update:document, delete:document]
+      - clientId: cli
+        enabled: true
+        publicClient: false
+        clientAuthenticatorType: client-secret
+        secret: "${CLI_SECRET}"
+        standardFlowEnabled: false
+        directAccessGrantsEnabled: false
+        serviceAccountsEnabled: true
+        fullScopeAllowed: true
+        attributes: {access.token.lifespan: "300"}
+        defaultClientScopes: [basic, email, profile, roles, web-origins, read:document, create:document, update:document, delete:document]
+    users:
+      - username: admin
+        enabled: true
+        email: admin@example.com
+        emailVerified: true
+        firstName: Admin
+        lastName: Admin
+        realmRoles: [default-roles-trustify, trustify-admin, trustify-manager]
+        credentials:
+          - type: password
+            value: "${TPA_ADMIN_PASSWORD}"
+            temporary: false
+      - username: service-account-cli
+        enabled: true
+        serviceAccountClientId: cli
+        realmRoles: [default-roles-trustify, trustify-manager]

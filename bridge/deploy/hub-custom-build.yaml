@@ -1,0 +1,31 @@
+# In-cluster build of the customized MTA hub (agentic run recorder +
+# logs/transcript endpoints) from ~/git/mta-tackle2-hub.
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mta-hub-custom
+  namespace: openshift-mta
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mta-hub-custom
+  namespace: openshift-mta
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mta-hub-custom:latest
+  # The Go build (make vet + strictfips build) needs more than the
+  # single-node cluster's default request.
+  resources:
+    requests:
+      memory: 2Gi
+    limits:
+      memory: 6Gi

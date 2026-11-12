@@ -1,0 +1,12 @@
+# Agent Skills image: one directory per skill at the image root
+# (SkillCard spec.image + spec.subPath).
+FROM scratch
+COPY rgctl/ /rgctl/
+# migiq skills (sshaaf/migiq, vendored with approval: the repo is private
+# so the SkillCard git-source clone, which is anonymous, cannot reach it).
+COPY mig-prompt-builder/ /mig-prompt-builder/
+COPY mig-plan/ /mig-plan/
+COPY mig-execute/ /mig-execute/
+COPY mig-containerize/ /mig-containerize/
+COPY mig-deploy/ /mig-deploy/
+COPY mig-rgctl/ /mig-rgctl/

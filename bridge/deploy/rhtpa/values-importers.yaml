@@ -1,0 +1,65 @@
+# Importers (Deployment Guide, Appendix C). Red Hat CSAF is enabled so RHTPA
+# continuously receives Red Hat security advisories/VEX; GitHub OSV supplies
+# advisories keyed on upstream Maven/npm/Go coordinates; the Go vulnerability
+# database covers Go modules; the CVE list supplies CVE metadata. CSAF and CVE
+# keep pattern/year filters so their initial sync stays tractable on a
+# single-node cluster; advisory sources used for matching are unfiltered.
+modules:
+  createImporters:
+    enabled: true
+    image:
+      registry: registry.redhat.io/rhel9
+      name: postgresql-16
+      version: latest
+    importers:
+      redhat-sboms:
+        sbom:
+          description: All Red Hat SBOMs
+          period: 1d
+          source: https://security.access.redhat.com/data/sbom/v1/
+          keys:
+            - https://security.access.redhat.com/data/97f5eac4.txt#77E79ABE93673533ED09EBE2DCE3823597F5EAC4
+          disabled: true
+          fetchRetries: 50
+      redhat-csaf:
+        csaf:
+          description: Red Hat CSAF advisories and VEX (current year + demo CVEs)
+          period: 1h
+          source: redhat.com
+          disabled: false
+          fetchRetries: 50
+          onlyPatterns:
+            - "/2026/"
+            - "cve-2022-1471"
+            - "cve-2022-42889"
+      cve:
+        cve:
+          description: CVE list v5
+          period: 1d
+          source: https://github.com/CVEProject/cvelistV5
+          disabled: false
+          years: [2022, 2026]
+      osv-github:
+        osv:
+          description: GitHub Advisory Database (reviewed)
+          period: 1h
+          source: https://github.com/github/advisory-database
+          path: advisories/github-reviewed
+          disabled: false
+      # The Go vulnerability database: module-level records (GitHub often
+      # lists Go *packages*, which never match SBOM modules) and the many
+      # golang.org/x/* advisories that have no GitHub advisory at all.
+      go-vulndb:
+        osv:
+          description: Go Vulnerability Database
+          period: 1h
+          source: https://github.com/golang/vulndb
+          path: data/osv
+          disabled: false
+      quay-redhat-user-workloads:
+        quay:
+          description: SBOMs from konflux image attachments
+          period: 1d
+          source: quay.io
+          namespace: redhat-user-workloads
+          disabled: true

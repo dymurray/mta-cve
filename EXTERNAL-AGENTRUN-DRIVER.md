@@ -84,9 +84,8 @@ The demo agent image is **not public** on quay (only its base,
 cluster can pull:
 
 ```bash
-git clone git@github.com:dymurray/mta-rhtpa-bridge.git
+git clone -b jira-cve-source https://github.com/dymurray/mta-rhtpa-bridge.git
 cd mta-rhtpa-bridge
-git checkout jira-cve-source
 
 podman build -t quay.io/<you>/agent-cve:latest -f images/agent-cve/Containerfile .
 podman push quay.io/<you>/agent-cve:latest
@@ -97,7 +96,10 @@ Contents: `agent-migiq` goose harness + JDK 21 + Maven + Go 1.26 + Python 3
 (rgctl needs glibc ≥ 2.39) — the Containerfile already is.
 
 (The same repo's `hack/build-agent.sh` does this as an in-cluster BuildConfig if you
-prefer; it targets the demo cluster's internal registry.)
+prefer; it targets the demo cluster's internal registry. The full demo environment —
+including this image build — is automated by [`install-mta.sh`](install-mta.sh) in
+[dymurray/mta-cve](https://github.com/dymurray/mta-cve); see
+[README.md](README.md) for the complete component/branch map.)
 
 ## 3. Seed the platform (Gateway → skills → agent)
 

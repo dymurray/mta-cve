@@ -6,15 +6,16 @@ document, [`EXTERNAL-AGENTRUN-DRIVER.md`](EXTERNAL-AGENTRUN-DRIVER.md), covers d
 the same agentic remediation from an external service (pipeline) on a **public** MTA
 install without the MTA inventory.
 
-Source repositories:
+Source repositories (all code lives on public branches of Dylan's forks — the full
+map with links is in [README.md](README.md)):
 
 | Repo | Branch | Contents |
 |---|---|---|
-| `~/git/mta-rhtpa-bridge` | `jira-cve-source` | Bridge: addons, watchers, deploy manifests, hack scripts (everything provisioned here) |
-| `~/git/mta-tackle2-ui-cve` | `agentic-observability` | Custom MTA UI (Vulnerabilities tab, CVE config panel) |
-| `~/git/mta-tackle2-hub` | `agentic-observability` | Custom hub build (only needed for the custom UI pairing; the stock 8.3.x hub has the agentic API) |
-| `~/git/tackle2-addon-discovery` | `language-weight-threshold` (PR konveyor/tackle2-addon-discovery#48) | Discovery language-weight fix |
-| `~/git/agentic-controller` | `harness-push-url` (built into the agent image) | Harness that runs inside AgentRun pods |
+| [dymurray/mta-rhtpa-bridge](https://github.com/dymurray/mta-rhtpa-bridge/tree/jira-cve-source) | [`jira-cve-source`](https://github.com/dymurray/mta-rhtpa-bridge/tree/jira-cve-source) | Bridge: addons, watchers, deploy manifests, hack scripts — vendored here as `bridge/` |
+| [dymurray/tackle2-ui](https://github.com/dymurray/tackle2-ui/tree/agentic-observability) | [`agentic-observability`](https://github.com/dymurray/tackle2-ui/tree/agentic-observability) | Custom MTA UI (Vulnerabilities tab, CVE config panel) |
+| [dymurray/tackle2-hub](https://github.com/dymurray/tackle2-hub/tree/agentic-observability) | [`agentic-observability`](https://github.com/dymurray/tackle2-hub/tree/agentic-observability) | Custom hub build (only needed for the custom UI pairing; the stock 8.3.x hub has the agentic API) |
+| [dymurray/tackle2-addon-discovery](https://github.com/dymurray/tackle2-addon-discovery/tree/language-weight-threshold) | [`language-weight-threshold`](https://github.com/dymurray/tackle2-addon-discovery/tree/language-weight-threshold) → [PR konveyor/tackle2-addon-discovery#48](https://github.com/konveyor/tackle2-addon-discovery/pull/48) | Discovery language-weight fix |
+| [dymurray/agentic-controller](https://github.com/dymurray/agentic-controller/tree/harness-push-url) | [`harness-push-url`](https://github.com/dymurray/agentic-controller/tree/harness-push-url) | Harness that runs inside AgentRun pods (adds `HARNESS_PUSH_URL`; built into the agent image) |
 
 ---
 
@@ -60,7 +61,7 @@ Source repositories:
    default-branch HEAD moved, retries failed findings (max 3 attempts, then `Exhausted`),
    and tracks PRs.
 
-### 1.3 Components (all in `~/git/mta-rhtpa-bridge`)
+### 1.3 Components (all under `bridge/` in this repo)
 
 | Path | What |
 |---|---|
@@ -111,11 +112,11 @@ Source repositories:
 
 ## 2. Provisioning a new environment
 
-All scripts live in `~/git/mta-rhtpa-bridge/hack/` and read `hack/env.sh`. Defaults:
-kubeconfig `~/Downloads/kubeconfig-dylan` (override with `KUBECONFIG_DYLAN`), context
-`admin` (override `KCTX`), namespace `openshift-mta` (`MTA_NS`), RHTPA namespace
+All scripts live in `bridge/hack/` and read `bridge/hack/env.sh`. Defaults: the
+ambient `KUBECONFIG` (override `KUBECONFIG_DYLAN`), context `admin` (override
+`KCTX`), namespace `openshift-mta` (`MTA_NS`), RHTPA namespace
 `trusted-profile-analyzer` (`TPA_NS`). Generated credentials go into the gitignored,
-mode-600 `.secrets.env` at the repo root (auto-created on first run).
+mode-600 `bridge/.secrets.env` (auto-created on first run).
 
 ### 2.1 Prerequisites
 
@@ -125,11 +126,15 @@ mode-600 `.secrets.env` at the repo root (auto-created on first run).
 - A JIRA API token + email (for the JIRA CVE source; optional).
 - An LLM API key for the agent Gateway (e.g. Anthropic-compatible endpoint).
 
+The bridge is vendored in this repo as `bridge/` (a snapshot of
+[dymurray/mta-rhtpa-bridge@`jira-cve-source`](https://github.com/dymurray/mta-rhtpa-bridge/tree/jira-cve-source)).
+All `hack/...` paths below are under `bridge/`. Everything in §2 is automated by the
+top-level [`install-mta.sh`](install-mta.sh); this section is what it does, step by
+step. All scripts read `bridge/hack/env.sh`:
+
 ```bash
-git clone git@github.com:dymurray/mta-rhtpa-bridge.git
-cd mta-rhtpa-bridge
-git checkout jira-cve-source
-source hack/env.sh     # creates .secrets.env on first run
+git clone https://github.com/dymurray/mta-cve.git && cd mta-cve
+source bridge/hack/env.sh     # creates bridge/.secrets.env on first run
 ```
 
 ### 2.2 Install MTA (the platform)
@@ -170,7 +175,7 @@ Wait for the hub: `oc -n openshift-mta rollout status deploy/mta-hub`.
 ### 2.3 Install RHTPA (the vulnerability source)
 
 ```bash
-hack/install-rhtpa.sh
+bridge/hack/install-rhtpa.sh
 ```
 
 Installs the RHBK operator + Keycloak realm `trustify`, PostgreSQL, and Helm chart
@@ -186,15 +191,15 @@ ownership metadata.
 ### 2.4 Build the images
 
 ```bash
-hack/build.sh         # mta-rhtpa-bridge: sbom-discovery, cve-remediation, cve-watcher, jira-watcher, nightly-refresh
-hack/build-agent.sh   # agent-cve: harness + JDK/Maven/Go/Python/rgctl/bazelisk
-hack/build-ui.sh      # mta-ui-cve: custom UI, pins the Tackle CR by digest
+bridge/hack/build.sh         # mta-rhtpa-bridge: sbom-discovery, cve-remediation, cve-watcher, jira-watcher, nightly-refresh
+bridge/hack/build-agent.sh   # agent-cve: harness + JDK/Maven/Go/Python/rgctl/bazelisk
+bridge/hack/build-ui.sh      # mta-ui-cve: custom UI, pins the Tackle CR by digest
 ```
 
 Each creates an ImageStream + BuildConfig in `openshift-mta` and tags the result.
-`hack/build-ui.sh` also sets `ui_image_fqin` on the Tackle CR (and the deployment
+`bridge/hack/build-ui.sh` also sets `ui_image_fqin` on the Tackle CR (and the deployment
 directly if the operator is scaled to 0). To revert to the stock UI, remove
-`ui_image_fqin`. Skills image: `hack/vendor-rgctl-skill.sh <tag>` refreshes
+`ui_image_fqin`. Skills image: `bridge/hack/vendor-rgctl-skill.sh <tag>` refreshes
 `images/skills` (rgctl skill @ v0.4.21, frontmatter fixed).
 
 ### 2.5 Wire the bridge into MTA
@@ -203,23 +208,23 @@ directly if the operator is scaled to 0). To revert to the stock UI, remove
    role cannot create AgentRuns):
 
    ```bash
-   oc -n openshift-mta port-forward svc/mta-hub 18080:8080 &
-   HUB_URL=http://localhost:18080 hack/hub.sh POST /serviceaccounts \
-       -d '{"name":"rhtpa.cve-bridge","userName":"rhtpa.cve-bridge","role":"architect"}'
-   # note the id, then:
-   HUB_URL=http://localhost:18080 hack/hub.sh POST /serviceaccounts/<id>/tokens -d '{}'
+   bridge/hack/mint-hub-token.sh
    ```
 
-   Save the token as `HUB_BRIDGE_TOKEN=<token>` in `.secrets.env`.
+   It port-forwards the hub, creates (or reuses) service account `rhtpa.cve-bridge`,
+   mints a token, and saves `HUB_BRIDGE_TOKEN` into `bridge/.secrets.env`. The manual
+   equivalent is `bridge/hack/hub.sh` (`POST /serviceaccounts`, then
+   `POST /serviceaccounts/<id>/tokens`).
 
-2. Add the other credentials to `.secrets.env` (see `.secrets.env.example` conventions in
-   `hack/setup-mta.sh`): GitHub token, `JIRA_URL`/`JIRA_EMAIL`/`JIRA_TOKEN`, the LLM
-   gateway key, git identity.
+2. Add the other credentials to `bridge/.secrets.env`: `JIRA_URL`/`JIRA_EMAIL`/`JIRA_TOKEN`
+   (Atlassian API token) and `LLM_API_KEY` (the key for the agents' LLM endpoint,
+   referenced by `deploy/mta/05-gateway.yaml`). A GitHub token is needed later for the
+   applications' source credentials.
 
 3. Run the wiring:
 
    ```bash
-   hack/setup-mta.sh
+   bridge/hack/setup-mta.sh
    ```
 
    Creates: secrets (`rhtpa-bridge`, `hub-bridge-token`, `jira-credentials`,
@@ -285,9 +290,9 @@ directly — the hub watches them live. If it runs, keep the values in the Tackl
    The app drawer's **Vulnerabilities** tab shows findings, reachability, OpenVEX,
    PR/AgentRun/JIRA links.
 4. Go demo: add `dymurray/mta-cve-demo-go.git` the same way.
-5. Live publication: `hack/publish-advisory.sh` (uploads GHSA-j288-q9x7-2f5v,
+5. Live publication: `bridge/hack/publish-advisory.sh` (uploads GHSA-j288-q9x7-2f5v,
    CVE-2025-48924 commons-lang3 — fixed via `dependencyManagement` override).
-6. Start over: `hack/reset-demo.sh <app-id> [owner/repo]`.
+6. Start over: `bridge/hack/reset-demo.sh <app-id> [owner/repo]`.
 
 ### 2.8 Day-2 operations
 
@@ -313,8 +318,8 @@ with `internal/osv/catalog.yaml` supplying method-level data that advisories omi
 ### 2.9 Teardown
 
 ```bash
-kubectl -n openshift-mta delete -f deploy/mta/ -f deploy/networkpolicy.yaml
-# + the secrets and BuildConfigs/ImageStreams created by hack/setup-mta.sh and hack/build*.sh
+kubectl -n openshift-mta delete -f bridge/deploy/mta/ -f bridge/deploy/networkpolicy.yaml
+# + the secrets and BuildConfigs/ImageStreams created by bridge/hack/setup-mta.sh and hack/build*.sh
 helm uninstall redhat-trusted-profile-analyzer -n trusted-profile-analyzer
 oc delete namespace trusted-profile-analyzer
 # hub: delete service account rhtpa.cve-bridge (and optionally apps/facts/tags); remove

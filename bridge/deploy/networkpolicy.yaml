@@ -1,0 +1,40 @@
+# Additive egress for openshift-mta (the MTA operator's mta-egress policy only
+# allows 80/443/6443/8443/8081/8082): in-cluster builds push to the internal
+# registry (5000) and bridge pods reach RHTPA's Keycloak service (8080).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: mta-rhtpa-bridge-egress
+  namespace: openshift-mta
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: openshift-image-registry
+      ports:
+        - port: 5000
+          protocol: TCP
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: trusted-profile-analyzer
+      ports:
+        - port: 8080
+          protocol: TCP
+        - port: 8443
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+    # External HTTPS for the JIRA CVE source: jira-watcher polls
+    # redhat.atlassian.net and the cve-remediation addon falls back to
+    # api.osv.dev when RHTPA's importers do not know a CVE. NetworkPolicy
+    # cannot match DNS names, so this opens 443 to any destination.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - port: 443
+          protocol: TCP

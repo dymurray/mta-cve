@@ -1,0 +1,70 @@
+# Single PostgreSQL 16 instance shared by RHTPA (db "trustify", created by the
+# chart's createDatabase job) and Keycloak (db "keycloak", created here).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql
+  namespace: trusted-profile-analyzer
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql
+  namespace: trusted-profile-analyzer
+  labels: {app: postgresql}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: postgresql}
+  template:
+    metadata:
+      labels: {app: postgresql}
+    spec:
+      containers:
+        - name: postgresql
+          image: registry.redhat.io/rhel9/postgresql-16:latest
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRESQL_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgresql-bootstrap, key: admin-password}}
+            - name: POSTGRESQL_USER
+              value: keycloak
+            - name: POSTGRESQL_PASSWORD
+              valueFrom: {secretKeyRef: {name: postgresql-bootstrap, key: keycloak-password}}
+            - name: POSTGRESQL_DATABASE
+              value: keycloak
+            - name: POSTGRESQL_MAX_CONNECTIONS
+              value: "200"
+          readinessProbe:
+            exec:
+              command: [/usr/libexec/check-container]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests: {cpu: 250m, memory: 512Mi}
+            limits: {memory: 2Gi}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/pgsql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: postgresql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: trusted-profile-analyzer
+spec:
+  selector: {app: postgresql}
+  ports:
+    - port: 5432
+      targetPort: 5432

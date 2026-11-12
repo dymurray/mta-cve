@@ -1,0 +1,17 @@
+# LLM Gateway for the cve-remediator and migiq agents.
+# The API key lives in secret 'enmaas-key' (key 'api-key'), created by
+# hack/setup-mta.sh from LLM_API_KEY in .secrets.env.
+apiVersion: konveyor.io/v1alpha1
+kind: Gateway
+metadata:
+  name: enmaas
+  namespace: openshift-mta
+spec:
+  provider: anthropic
+  endpoint: https://api.enmaas.devshift.net
+  model:
+    name: claude-sonnet-4-6
+    contextWindow: 200000
+  credentialRef:
+    secretName: enmaas-key
+    key: api-key

@@ -1,0 +1,26 @@
+# Namespace + Red Hat build of Keycloak operator (OIDC provider for RHTPA).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: trusted-profile-analyzer
+---
+apiVersion: operators.coreos.com/v1
+kind: OperatorGroup
+metadata:
+  name: trusted-profile-analyzer
+  namespace: trusted-profile-analyzer
+spec:
+  targetNamespaces:
+    - trusted-profile-analyzer
+---
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: rhbk-operator
+  namespace: trusted-profile-analyzer
+spec:
+  channel: stable-v26.6
+  name: rhbk-operator
+  source: redhat-operators
+  sourceNamespace: openshift-marketplace
+  installPlanApproval: Automatic

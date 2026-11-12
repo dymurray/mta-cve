@@ -1,0 +1,385 @@
+package scm
+
+import (
+	"errors"
+	"fmt"
+	urllib "net/url"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+
+	liberr "github.com/jortel/go-utils/error"
+	"github.com/konveyor/tackle2-hub/shared/command"
+	"github.com/konveyor/tackle2-hub/shared/nas"
+	"github.com/konveyor/tackle2-hub/shared/ssh"
+)
+
+// RevisionRegex match revision embedded in `svn info`.
+var RevisionRegex = regexp.MustCompile(`(Revision\:\s+)([\d]+)`)
+
+// Subversion repository.
+// Subversion >= 1.10 required.
+type Subversion struct {
+	Base
+}
+
+// Validate settings.
+func (r *Subversion) Validate() (err error) {
+	u := SvnURL{}
+	err = u.With(r.Remote)
+	if err != nil {
+		return
+	}
+	switch u.Scheme {
+	case "http":
+		if !r.Remote.Insecure {
+			err = errors.New("http URL used with snv.insecure.enabled = FALSE")
+			return
+		}
+	}
+	return
+}
+
+// Fetch clones the repository.
+func (r *Subversion) Fetch() (err error) {
+	err = r.mustEmptyDir(r.Path)
+	if err != nil {
+		return
+	}
+	err = r.initHome()
+	if err != nil {
+		return
+	}
+	err = r.checkout()
+	return
+}
+
+// Update the repository using the remote.
+func (r *Subversion) Update() (err error) {
+	err = r.initHome()
+	if err != nil {
+		return
+	}
+	cmd := r.svn()
+	cmd.Dir = r.root()
+	cmd.Options.Add("update")
+	err = cmd.Run()
+	return
+}
+
+// Branch checks out a branch.
+// The branch is created as needed. The `ref` may be either:
+// - fully qualified URL (includes branch and root path)
+// - branch|tag path. (branches/stable).
+func (r *Subversion) Branch(ref string, options ...Option) (err error) {
+	err = r.initHome()
+	if err != nil {
+		return
+	}
+	branch := Subversion{}
+	branch.Base = r.Base
+	parsed, err := urllib.Parse(ref)
+	if err != nil {
+		err = liberr.Wrap(err)
+		return
+	}
+	if parsed.IsAbs() {
+		branch.Remote.URL = ref
+		branch.Remote.Branch = ""
+		branch.Remote.Path = ""
+	} else {
+		branch.Remote.Branch = ref
+	}
+	defer func() {
+		if err == nil {
+			r.Remote = branch.Remote
+		}
+	}()
+	err = branch.checkout()
+	if err == nil {
+		return
+	}
+	if HasOption(options, CREATE) {
+		err = branch.createBranch(r.URL().String())
+	}
+	return
+}
+
+// Commit records changes to the repo and push to the server
+func (r *Subversion) Commit(files []string, msg string) (err error) {
+	err = r.initHome()
+	if err != nil {
+		return
+	}
+	err = r.addFiles(files)
+	if err != nil {
+		return
+	}
+	cmd := r.svn()
+	cmd.Dir = r.root()
+	cmd.Options.Add("commit", "-m", msg)
+	err = cmd.Run()
+	return
+}
+
+// Push changes to the remote.
+func (r *Subversion) Push() (err error) {
+	return
+}
+
+// Head returns the current revision.
+func (r *Subversion) Head() (commit string, err error) {
+	err = r.initHome()
+	if err != nil {
+		return
+	}
+	cmd := r.svn()
+	cmd.Dir = r.root()
+	cmd.Options.Add("info", "-r", "HEAD")
+	err = cmd.Run()
+	if err != nil {
+		return
+	}
+	output := cmd.Output()
+	m := RevisionRegex.FindStringSubmatch(string(output))
+	if len(m) == 3 {
+		commit = m[2]
+	} else {
+		err = liberr.New("[SVN] info parser failed.")
+	}
+	return
+}
+
+// URL returns the parsed URL.
+func (r *Subversion) URL() (u *SvnURL) {
+	u = &SvnURL{}
+	_ = u.With(r.Remote)
+	return
+}
+
+// initHome ensures the home directory is updated.
+func (r *Subversion) initHome() (err error) {
+	err = nas.RmDir(r.Home)
+	if err != nil {
+		err = liberr.Wrap(err)
+		return
+	}
+	err = nas.MkDir(r.Home, 0755)
+	if err != nil {
+		err = liberr.Wrap(err)
+		return
+	}
+	err = r.writeConfig()
+	if err != nil {
+		return
+	}
+	identity := r.Remote.Identity
+	if identity != nil {
+		key := ssh.Key{
+			ID:         identity.ID,
+			Name:       identity.Name,
+			Content:    identity.Key,
+			Passphrase: identity.Password,
+		}
+		Log.V(1).Info(
+			fmt.Sprintf("[SVN] Using identity: (id=%d) %s",
+				identity.ID,
+				identity.Name))
+		err = key.Add()
+		if err != nil {
+			return
+		}
+	}
+	return
+}
+
+// svn returns an svn command.
+func (r *Subversion) svn() (cmd *command.Command) {
+	cmd = command.New("/usr/bin/svn")
+	cmd.Env = append(os.Environ(), "HOME="+r.Home)
+	cmd.Options.Add("--non-interactive")
+	cmd.Options.Add("--password-from-stdin")
+	cmd.Options.Add("--no-auth-cache")
+	r.setBasicAuth(cmd)
+	if r.Remote.Insecure {
+		cmd.Options.Add("--trust-server-cert")
+	}
+	return
+}
+
+// root returns a path to the cloned repository.
+func (r *Subversion) root() (p string) {
+	p = filepath.Join(r.Path, r.Remote.Path)
+	return
+}
+
+// checkout the repository.
+func (r *Subversion) checkout() (err error) {
+	root := r.root()
+	_ = nas.RmDir(r.Path)
+	_ = nas.MkDir(root, 0777)
+	u := r.URL()
+	cmd := r.svn()
+	cmd.Options.Add("checkout", u.String(), root)
+	err = cmd.Run()
+	return
+}
+
+// createBranch create and checkout a branch.
+func (r *Subversion) createBranch(baseURL string) (err error) {
+	u := r.URL()
+	cmd := r.svn()
+	cmd.Options.Add(
+		"copy",
+		baseURL,
+		u.String(),
+		"-m",
+		"Create branch: "+u.String())
+	err = cmd.Run()
+	if err != nil {
+		return
+	}
+	err = r.checkout()
+	return
+}
+
+// addFiles adds files to staging area
+func (r *Subversion) addFiles(files []string) (err error) {
+	cmd := r.svn()
+	cmd.Dir = r.root()
+	cmd.Options.Add("add")
+	cmd.Options.Add("--force", files...)
+	err = cmd.Run()
+	return
+}
+
+// writeConfig writes configuration file.
+func (r *Subversion) writeConfig() (err error) {
+	path := filepath.Join(
+		r.Home,
+		".subversion",
+		"servers")
+	err = nas.MkDir(filepath.Dir(path), 0755)
+	if err != nil {
+		return
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		err = liberr.Wrap(
+			err,
+			"path",
+			path)
+		return
+	}
+	proxy, err := r.proxy()
+	if err != nil {
+		return
+	}
+	_, err = f.Write([]byte(proxy))
+	if err != nil {
+		err = liberr.Wrap(
+			err,
+			"path",
+			path)
+	}
+	_ = f.Close()
+	Log.V(1).Info("[SVN] Created: " + path)
+	return
+}
+
+// setBasicAuth sets user and password options and params when defined.
+func (r *Subversion) setBasicAuth(cmd *command.Command) {
+	identity := r.Remote.Identity
+	if identity == nil {
+		return
+	}
+	if identity.User == "" || identity.Password == "" {
+		return
+	}
+	Log.V(1).Info(
+		fmt.Sprintf("[SVN] Using identity:(id=%d) %s",
+			identity.ID,
+			identity.Name))
+	cmd.Reader = strings.NewReader(identity.Password + "\n")
+	cmd.Options.Add("--username", "${user}")
+	cmd.Set("user", identity.User)
+	return
+}
+
+// proxy builds the proxy.
+func (r *Subversion) proxy() (proxy string, err error) {
+	kind := ""
+	u := r.URL()
+	switch u.Scheme {
+	case "http":
+		kind = "http"
+	case "https",
+		"git@github.com":
+		kind = "https"
+	default:
+		return
+	}
+	p, found := r.Proxies[kind]
+	if !found {
+		return
+	}
+	for _, h := range p.Excluded {
+		if h == u.Host {
+			return
+		}
+	}
+	Log.V(1).Info(
+		fmt.Sprintf("[SVN] Using proxy:(id=%d) %s",
+			p.ID,
+			p.Kind))
+	proxy = "[global]\n"
+	proxy += fmt.Sprintf("http-proxy-host = %s\n", p.Host)
+	if p.Port > 0 {
+		proxy += fmt.Sprintf("http-proxy-port = %d\n", p.Port)
+	}
+	id := p.Identity
+	if id != nil {
+		proxy += fmt.Sprintf("http-proxy-username = %s\n", id.User)
+		proxy += fmt.Sprintf("http-proxy-password = %s\n", id.Password)
+	}
+	proxy += fmt.Sprintf(
+		"(http-proxy-exceptions = %s\n",
+		strings.Join(p.Excluded, " "))
+	return
+}
+
+// SvnURL subversion URL.
+type SvnURL struct {
+	Raw      string
+	Branch   string
+	RootPath string
+	Scheme   string
+	Host     string
+}
+
+// With initializes with a remote.
+func (u *SvnURL) With(r Remote) (err error) {
+	parsed, err := urllib.Parse(r.URL)
+	if err != nil {
+		return
+	}
+	u.Raw = r.URL
+	u.Branch = r.Branch
+	u.RootPath = r.Path
+	u.Scheme = parsed.Scheme
+	u.Host = parsed.Host
+	return
+}
+
+// String returns a URL with Branch and RootPath appended.
+func (u *SvnURL) String() (s string) {
+	parsed, err := urllib.Parse(u.Raw)
+	if err == nil {
+		parsed.Path = filepath.Join(parsed.Path, u.Branch, u.RootPath)
+		s = parsed.String()
+	} else {
+		s = u.Raw
+	}
+	return
+}

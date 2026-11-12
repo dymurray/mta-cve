@@ -1,0 +1,34 @@
+# nightly-refresh: each night, submits an sbom-discovery task for every
+# application in the CVE archetype whose repository head has moved.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-refresh
+  namespace: openshift-mta
+  labels: {app: nightly-refresh}
+spec:
+  schedule: "0 2 * * *"
+  timeZone: UTC
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels: {app: nightly-refresh}
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: refresh
+              image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+              imagePullPolicy: Always
+              command: [/usr/bin/nightly-refresh]
+              env:
+                - {name: HUB_BASE_URL, value: "http://mta-hub.openshift-mta.svc:8080"}
+                - {name: CVE_ARCHETYPE, value: konveyor-cves}
+                - {name: HOME, value: /tmp}
+              envFrom:
+                - secretRef: {name: hub-bridge-token}
+              resources:
+                requests: {cpu: 50m, memory: 64Mi}

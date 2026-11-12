@@ -1,0 +1,322 @@
+# Agents used when a CVE fix needs code changes (library API surface changed).
+# Image: agent-migiq runtime + JDK 21 + Maven + Go + Python + rgctl 0.4.21 (images/agent-cve).
+# Skills: rgctl from the rgctl repo (v0.4.21, includes the OSV / OpenVEX vuln
+# workflow; served from images/skills) and the inline cve-remediation procedure.
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: rgctl-osv
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: rgctl Code Graph (OSV / OpenVEX)
+  description: >-
+    rgctl code-graph skill from the rgctl repository, including the
+    vuln / deps / reachability workflow (deps check, vuln analyze -> OpenVEX).
+  type: skill
+  # rgctl repo skills/rgctl @ v0.4.21, vendored in images/skills with its
+  # frontmatter made spec-conformant (the loader rejects upstream's
+  # top-level rgctl-managed field).
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: rgctl
+  version: 0.4.21
+  tags: [analysis, rgctl, security]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: cve-remediation
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: CVE Remediation
+  description: >-
+    Remediate one CVE in a Java/Maven, Go module or Python project: upgrade
+    (or, for Go, migrate to the fixed major module), adapt call sites found with rgctl,
+    verify the build/tests and rgctl vuln analyze, and record a summarized
+    remediation report in the commit message.
+  type: skill
+  version: 2.5.0
+  tags: [security, cve, java, go, python, bazel]
+  inline: |
+    ---
+    name: cve-remediation
+    description: >-
+      Remediate a single CVE in a Java/Maven, Go module or Python project when a
+      dependency upgrade changes the library API. Use for CVE/RHTPA
+      remediation runs: upgrade, fix call sites (found with the rgctl skill),
+      verify the build/tests and rgctl vuln analyze, and commit with a
+      summarized report in the message.
+    ---
+
+    # CVE remediation
+
+    The run instructions give you the CVE, affected dependency, required
+    fixed version, the compiler errors a plain bump produces, the rgctl
+    reachability result (call sites, external-input paths, OpenVEX status)
+    and the OSV document for the vulnerability.
+
+    ## Procedure
+
+    1. **Index**: run `rgctl discover . --with-cfg` (rgctl skill, vuln workflow).
+    2. **Upgrade**: never downgrade, exclude, or remove the dependency.
+       - Maven: set the required fixed version in `pom.xml` (prefer updating
+         an existing version property).
+       - Go: `go get <module>@<version>` then `go mod tidy` (and
+         `go mod vendor` if `vendor/` exists). When the instructions say the
+         fix lives in another major version (e.g. `example.com/mod` to
+         `example.com/mod/v5`), rewrite every import of the old module path
+         and its subpackages to the new path first; do not keep the old module.
+       - Python: change the requirement in every `requirements*.txt` /
+         `pyproject.toml` dependency list naming it (keep pins as pins:
+         `==<version>`; for ranges raise the lower bound). For a transitive
+         dependency add a `<name>>=<version>` requirement (uv projects: a
+         `[tool.uv] constraint-dependencies` entry). Then regenerate the lock
+         file if present: `uv lock --upgrade-package <name>` or `poetry lock`.
+         Never hand-edit lock files.
+    3. **Find every use**: start from the call sites in the instructions,
+       then confirm with rgctl (`find`, `callers`, `relations --edge uses`) so
+       no use of the changed API is missed.
+    4. **Adapt**: make the smallest behavior-preserving change for the new
+       API. Keep or improve secure defaults (e.g. restrict deserialization to
+       known types instead of re-enabling unsafe behavior). Do not delete
+       functionality, skip, or weaken tests.
+    5. **Verify the build** until it compiles and all tests pass:
+       Maven `mvn -B clean verify`; Go `go build ./... && go test ./...`
+       (and `go vet ./...`); Python: install into a fresh venv
+       (`python3 -m venv /tmp/venv && /tmp/venv/bin/pip install -r <requirements>`
+       and `pip install .` for a pyproject project; `uv sync` / `poetry install`
+       with a lock file), then `python -m pytest`.
+    6. **Verify the fix**: save the OSV document from the instructions to
+       `/tmp/osv.json`, re-run `rgctl discover . --with-cfg`, then
+       `rgctl -f json deps check --osv /tmp/osv.json` and
+       `rgctl -f json vuln analyze --osv /tmp/osv.json`. The upgraded version
+       must be out of the affected range (deps verdict `not_affected`).
+
+    ## Repository dependency procedures
+
+    Some repositories generate files from their dependencies and commit
+    them, so editing the manifest (or re-vendoring with the go command)
+    alone leaves them broken. Before upgrading, look for the repository's
+    own procedure (Makefile targets such as `deps-update`, `hack/*dep*`
+    scripts, CONTRIBUTING/docs) and follow it. The run instructions say
+    "No scripted update was attempted" when the addon detected such a
+    repository.
+
+    ### Bazel BUILD files in vendor/ (kubevirt/kubevirt)
+
+    Signs: `vendor/**/BUILD.bazel`, `WORKSPACE`/`MODULE.bazel`,
+    `.bazelversion`, `hack/dep-update.sh` and `hack/bazel-generate.sh`.
+    kubevirt's `make deps-update` = `hack/dep-update.sh` then
+    `hack/bazel-generate.sh`, normally inside its builder container. The
+    sandbox has no container runtime: run the scripts directly
+    (`KUBEVIRT_RUN_UNNESTED=true` makes `hack/dockerized` run in place).
+    `bazel` is bazelisk and downloads the version in `.bazelversion`.
+
+    1. **Update only the affected module** in every workspace module:
+       `./hack/dep-update.sh -- <module>@<version>` (go get + go mod tidy
+       in `staging/src/kubevirt.io/api` and `client-go`, go mod tidy at the
+       root, `go work vendor`, `go work sync`, `go mod download all`). Do
+       not run `make deps-update` or `dep-update.sh` without arguments: that
+       moves every dependency. For a Go major migration, rewrite the imports
+       first.
+    2. **Regenerate the BUILD files**: `KUBEVIRT_RUN_UNNESTED=true make
+       bazel-generate` (gazelle, buildozer `cdeps` for libvirt and libnbd,
+       buildifier). If that fails on the builder environment, run the steps
+       of `hack/bazel-generate.sh` yourself (source `hack/common.sh` and
+       `hack/config.sh` for `ARCHITECTURE`): remove the BUILD/workspace
+       files it removes, `bazel run --config=${ARCHITECTURE} //:gazelle --
+       --exclude kubevirtci/cluster-up`, its two buildozer commands, then
+       `bazel run --config=${ARCHITECTURE} //:buildifier`.
+    3. **Check the diff before committing**: `git status --porcelain |
+       grep -E 'BUILD(\.bazel)?$'`. A deleted BUILD file is only correct
+       when its vendored package directory is gone; every vendored Go
+       package that remains must keep a `BUILD.bazel`. Never commit a change
+       that deletes the BUILD files of packages still vendored — that is
+       the go command's re-vendoring, not the update, and breaks the Bazel
+       build.
+    4. **Verify**: `go build` and `go test` the packages that import the
+       updated module (find them with `go list -deps`/`go list -f`).
+       `go build ./...` fails with or without the update on Bazel-only C
+       packages (`cmd/container-disk-v2alpha`, `cmd/virt-launcher-monitor`:
+       "C source files not allowed when not using cgo"); ignore exactly
+       those.
+    5. **Commit** all of it (go.mod/go.sum of every workspace module,
+       go.work.sum, vendor/ including the regenerated BUILD.bazel files) as
+       one signed commit, and say in the report that the BUILD files were
+       regenerated with gazelle.
+
+    ## Commit (report goes in the message, DCO signed)
+
+    Make a single commit with `git commit -s`: every commit must carry the
+    Developer Certificate of Origin trailer
+    (`Signed-off-by: <user.name> <user.email>`) for the configured git
+    identity; do not change `user.name`/`user.email`. Verify with
+    `git log -1 --format=%B` that the trailer is present; amend with
+    `git commit --amend -s --no-edit` if it is not.
+
+    The remediation report lives **only in the commit message**, which also
+    becomes the pull request description (the pull request is opened
+    automatically after the run; do not open it or push yourself). Do **not**
+    create `CVE_REMEDIATION_REPORT.md` or any other report file. Keep it
+    summarized (under ~25 lines), in this format:
+
+    The run instructions give the exact commit subject to use. Two styles:
+
+    - **Konveyor repositories** (github.com/konveyor/*, or repos whose
+      workflows run `konveyor/release-tools/cmd/verify-pr`): the subject is
+      the PR title and MUST start with a Konveyor gitmoji **alias** (the
+      text, never the emoji character, which verify-pr rejects):
+      `:bug:` for CVE fixes (patch fix); `:warning:` only if the change
+      alters the project's own public API or behavior. Other aliases
+      (`:sparkles:` feature, `:book:` docs, `:seedling:` infra, `:ghost:` no
+      release note) are not used for CVE fixes. Example:
+      `:bug: Upgrade golang.org/x/net v0.57.0 to v0.60.0 (CVE-2026-78659)`
+    - **Other repositories**: `fix(<CVE-ID>): upgrade <dep> <old> -> <new>`
+
+    ```
+    <subject as given in the instructions>
+
+    <One sentence: what the vulnerability is and why the upgrade fixes it.>
+
+    Code changes:
+    - <file>: <what changed and why the new API needs it>
+
+    Verification:
+    - <build command>: <N> tests passed / packages ok
+    - rgctl deps check: <verdict>; vuln analyze: <exploitability> (OpenVEX <status>)
+
+    Refs: <CVE-ID>, <advisory id(s)>
+
+    Signed-off-by: <user.name> <user.email>
+    ```
+
+    Summarize; do not paste build logs, full diffs, or rgctl JSON.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: cve-remediator-java
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: cve-remediation
+    - ref: rgctl-osv
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are a Java security remediation agent working in a Maven project.
+    Each run targets ONE vulnerability (CVE) reported by Red Hat Trusted
+    Profile Analyzer. Follow the cve-remediation skill exactly, and use the
+    rgctl skill (including its OSV vuln workflow) to find affected code and to
+    verify the fix. The run instructions carry the CVE details, compiler
+    errors, rgctl reachability results and the OSV document.
+
+    Hard rules:
+    - Upgrade to the required fixed version; never downgrade, exclude, or
+      remove the dependency to make the build pass.
+    - Do not delete, skip, or weaken tests.
+    - Commit with `git commit -s` (DCO Signed-off-by for the configured
+      identity) and put the summarized remediation report in the commit
+      message only; do not add report files (no CVE_REMEDIATION_REPORT.md).
+      The pull request is opened automatically from that commit.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: cve-remediator-go
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: cve-remediation
+    - ref: rgctl-osv
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are a Go security remediation agent working in a Go module project.
+    Each run targets ONE vulnerability (CVE) reported by Red Hat Trusted
+    Profile Analyzer. Follow the cve-remediation skill exactly, and use the
+    rgctl skill (including its OSV vuln workflow) to find affected code and to
+    verify the fix. The run instructions carry the CVE details, the build
+    errors after the update, rgctl reachability results and the OSV document.
+
+    Hard rules:
+    - Move to the required fixed version or module path; never downgrade,
+      add replace directives to vulnerable versions, or drop the dependency
+      to make the build pass.
+    - When migrating to a new major module path, update all imports and adapt
+      the code to that major's API (consult its documentation / source in the
+      module cache via `go doc`).
+    - When the repository has its own dependency procedure (the skill's
+      "Repository dependency procedures"; kubevirt: hack/dep-update.sh then
+      hack/bazel-generate.sh), use it, and never commit the deletion of
+      generated BUILD files for packages that are still vendored.
+    - Do not delete, skip, or weaken tests.
+    - Commit with `git commit -s` (DCO Signed-off-by for the configured
+      identity) and put the summarized remediation report in the commit
+      message only; do not add report files (no CVE_REMEDIATION_REPORT.md).
+      The pull request is opened automatically from that commit.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: cve-remediator-python
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: cve-remediation
+    - ref: rgctl-osv
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are a Python security remediation agent working in a Python project
+    (requirements*.txt and/or pyproject.toml, possibly with uv.lock or
+    poetry.lock). Each run targets one dependency update that fixes one or
+    more vulnerabilities (CVEs) reported by Red Hat Trusted Profile Analyzer.
+    Follow the cve-remediation skill exactly, and use the rgctl skill
+    (including its OSV vuln workflow) to find affected code and to verify the
+    fix. The run instructions carry the CVE details, the test failures after
+    the update, rgctl reachability results and the OSV document(s).
+
+    Hard rules:
+    - Require the given fixed version; never downgrade, pin a vulnerable
+      version, or drop the dependency to make the tests pass.
+    - Adapt the code to the new release's API (read its changelog / source in
+      the virtual environment's site-packages); keep secure defaults.
+    - Regenerate lock files with uv / poetry; never edit them by hand.
+    - Do not delete, skip, or weaken tests.
+    - Commit with `git commit -s` (DCO Signed-off-by for the configured
+      identity) and put the summarized remediation report in the commit
+      message only; do not add report files (no CVE_REMEDIATION_REPORT.md).
+      The pull request is opened automatically from that commit.

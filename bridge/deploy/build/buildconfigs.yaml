@@ -1,0 +1,109 @@
+# In-cluster image builds (the cluster is amd64; builds use binary uploads).
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mta-rhtpa-bridge
+  namespace: openshift-mta
+---
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mta-rhtpa-bridge
+  namespace: openshift-mta
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mta-rhtpa-bridge:latest
+  # A request (default: the limit) of 4Gi does not fit next to a waiting
+  # 4Gi cve-remediation task on the single-node cluster.
+  resources:
+    requests:
+      memory: 1536Mi
+    limits:
+      memory: 4Gi
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mta-ui-cve
+  namespace: openshift-mta
+---
+# MTA UI (migtools/mta-tackle2-ui release-0.11) + Vulnerabilities tab.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mta-ui-cve
+  namespace: openshift-mta
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Dockerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mta-ui-cve:latest
+  resources:
+    # Burstable: only limits were set before, which makes requests=limits
+    # (6Gi) and the build pod could not schedule on a memory-tight cluster.
+    requests:
+      memory: 2Gi
+    limits:
+      memory: 6Gi
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: agent-cve
+  namespace: openshift-mta
+---
+# CVE agent image (agent-migiq + JDK 21 + Maven + Go + rgctl).
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: agent-cve
+  namespace: openshift-mta
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: agent-cve:latest
+---
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  name: mta-cve-skills
+  namespace: openshift-mta
+---
+# Agent Skills image (images/skills): spec-conformant rgctl skill.
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  name: mta-cve-skills
+  namespace: openshift-mta
+spec:
+  source:
+    type: Binary
+  strategy:
+    type: Docker
+    dockerStrategy:
+      dockerfilePath: Containerfile
+  output:
+    to:
+      kind: ImageStreamTag
+      name: mta-cve-skills:latest

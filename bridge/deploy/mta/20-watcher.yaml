@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cve-watcher
+  namespace: openshift-mta
+  labels: {app: cve-watcher}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: cve-watcher}
+  template:
+    metadata:
+      labels: {app: cve-watcher}
+    spec:
+      containers:
+        - name: watcher
+          image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+          imagePullPolicy: Always
+          command: [/usr/bin/cve-watcher]
+          env:
+            - {name: HUB_BASE_URL, value: "http://mta-hub.openshift-mta.svc:8080"}
+            - {name: CVE_ARCHETYPE, value: konveyor-cves}
+            - {name: POLL_INTERVAL, value: 30s}
+            - {name: DRY_RUN, value: "false"}
+            - {name: HOME, value: /tmp}
+          envFrom:
+            - secretRef: {name: rhtpa-bridge}
+            - secretRef: {name: hub-bridge-token}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}

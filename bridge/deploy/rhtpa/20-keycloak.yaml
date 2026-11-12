@@ -1,0 +1,49 @@
+# RHBK instance. TLS terminates at the edge Route; tokens are issued for the
+# public hostname so in-cluster callers using the http service still get a
+# matching `iss`.
+apiVersion: k8s.keycloak.org/v2beta1
+kind: Keycloak
+metadata:
+  name: sso
+  namespace: trusted-profile-analyzer
+spec:
+  instances: 1
+  db:
+    vendor: postgres
+    host: postgresql
+    port: 5432
+    database: keycloak
+    usernameSecret: {name: keycloak-db, key: username}
+    passwordSecret: {name: keycloak-db, key: password}
+  http:
+    httpEnabled: true
+  hostname:
+    hostname: https://sso-trusted-profile-analyzer.apps.mta-cve.mg.dog8code.com
+    strict: false
+    backchannelDynamic: true
+  proxy:
+    headers: xforwarded
+  ingress:
+    enabled: false
+  bootstrapAdmin:
+    user:
+      secret: keycloak-bootstrap-admin
+  resources:
+    requests: {cpu: 250m, memory: 1Gi}
+    limits: {memory: 2Gi}
+---
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: sso
+  namespace: trusted-profile-analyzer
+spec:
+  host: sso-trusted-profile-analyzer.apps.mta-cve.mg.dog8code.com
+  to:
+    kind: Service
+    name: sso-service
+  port:
+    targetPort: http
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

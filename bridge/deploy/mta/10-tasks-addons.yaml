@@ -1,0 +1,84 @@
+# sbom-discovery: runs automatically in the discovery pipeline whenever an
+# application with a repository is created/updated (after language and
+# technology discovery).
+apiVersion: tackle.konveyor.io/v1alpha1
+kind: Task
+metadata:
+  name: sbom-discovery
+  namespace: openshift-mta
+  labels:
+    konveyor.io/discovery: sbom
+spec:
+  priority: 2
+  dependencies: [language-discovery]
+---
+apiVersion: tackle.konveyor.io/v1alpha1
+kind: Addon
+metadata:
+  name: sbom-discovery
+  namespace: openshift-mta
+spec:
+  task: sbom-discovery
+  container:
+    name: addon
+    image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+    imagePullPolicy: Always
+    command: [/usr/bin/sbom-discovery]
+    env:
+      - {name: CVE_ARCHETYPE, value: konveyor-cves}
+    envFrom:
+      - secretRef: {name: rhtpa-bridge}
+    resources:
+      requests: {cpu: 500m, memory: 1Gi}
+      limits: {memory: 2Gi}
+---
+# cve-remediation: submitted by the cve-watcher for each CVE RHTPA reports
+# against an application's SBOM.
+apiVersion: tackle.konveyor.io/v1alpha1
+kind: Task
+metadata:
+  name: cve-remediation
+  namespace: openshift-mta
+spec:
+  priority: 10
+---
+apiVersion: tackle.konveyor.io/v1alpha1
+kind: Addon
+metadata:
+  name: cve-remediation
+  namespace: openshift-mta
+spec:
+  task: cve-remediation
+  container:
+    name: addon
+    image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+    imagePullPolicy: Always
+    command: [/usr/bin/cve-remediation]
+    env:
+      - {name: CVE_ARCHETYPE, value: konveyor-cves}
+      - {name: CVE_AGENT, value: cve-remediator-java}
+      - {name: CVE_AGENT_GO, value: cve-remediator-go}
+      - {name: CVE_AGENT_PYTHON, value: cve-remediator-python}
+      - {name: GO_MAJOR_UPGRADE, value: newest}
+      # Author/committer and DCO Signed-off-by identity for every commit.
+      - {name: GIT_USER_NAME, value: Dylan Murray}
+      - {name: GIT_USER_EMAIL, value: dymurray@redhat.com}
+      # Remediation branches go to this account's fork of the repository
+      # (created when missing); pull requests are opened from the fork.
+      - {name: GIT_FORK_OWNER, value: dymurray}
+      # Agent sandboxes request no resources; run one bridge AgentRun at a
+      # time on the single-node cluster (the task waits for a free slot).
+      - {name: MAX_AGENT_RUNS, value: "1"}
+      - {name: CVE_AGENT_GATEWAY, value: enmaas}
+    envFrom:
+      - secretRef: {name: rhtpa-bridge}
+      - secretRef: {name: hub-bridge-token}
+    # Large repositories (kubevirt) need several Gi for the rgctl index and
+    # the Go build; 3Gi was OOM-killed. rgctl is held to 70% of the limit
+    # (RGCTL_MEMORY_LIMIT overrides) so an oversized index fails alone.
+    # The 4Gi request is also the concurrency gate on the single-node
+    # cluster: with 2Gi the scheduler ran three kubevirt tasks at once and
+    # starved the control plane (liveness failures, API outage).
+    resources:
+      requests: {cpu: "1", memory: 4Gi}
+      limits: {cpu: "2", memory: 8Gi}

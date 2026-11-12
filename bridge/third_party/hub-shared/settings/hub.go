@@ -1,0 +1,472 @@
+package settings
+
+import (
+	"bufio"
+	"os"
+	"os/user"
+	"strconv"
+	"time"
+
+	liberr "github.com/jortel/go-utils/error"
+)
+
+const (
+	EnvNamespace               = "NAMESPACE"
+	EnvBuild                   = "BUILD"
+	EnvAPIPort                 = "API_PORT"
+	EnvDbPath                  = "DB_PATH"
+	EnvDbMaxCon                = "DB_MAX_CONNECTION"
+	EnvDbSeedPath              = "DB_SEED_PATH"
+	EnvBucketPath              = "BUCKET_PATH"
+	EnvRwxSupported            = "RWX_SUPPORTED"
+	EnvCachePvc                = "CACHE_PVC"
+	EnvPassphrase              = "ENCRYPTION_PASSPHRASE"
+	EnvTaskReapCreated         = "TASK_REAP_CREATED"
+	EnvTaskReapSucceeded       = "TASK_REAP_SUCCEEDED"
+	EnvTaskReapFailed          = "TASK_REAP_FAILED"
+	EnvTaskPodRetainSucceeded  = "TASK_POD_RETAIN_SUCCEEDED"
+	EnvTaskPodRetainFailed     = "TASK_POD_RETAIN_FAILED"
+	EnvTaskPodQuota            = "TASK_POD_QUOTA"
+	EnvTaskSA                  = "TASK_SA"
+	EnvTaskRetries             = "TASK_RETRIES"
+	EnvTaskUid                 = "TASK_UID"
+	EnvTaskTokenLifespan       = "TASK_TOKEN_LIFESPAN"
+	EnvFrequencyTask           = "FREQUENCY_TASK"
+	EnvFrequencyReaper         = "FREQUENCY_REAPER"
+	EnvFrequencyHeap           = "FREQUENCY_HEAP"
+	EnvDevelopment             = "DEVELOPMENT"
+	EnvFrontendAuthDist        = "FRONTEND_AUTH_DIST"
+	EnvBucketTTL               = "BUCKET_TTL"
+	EnvFileTTL                 = "FILE_TTL"
+	EnvAppName                 = "APP_NAME"
+	EnvDisconnected            = "DISCONNECTED"
+	EnvAnalysisReportPath      = "ANALYSIS_REPORT_PATH"
+	EnvAnalysisArchiverEnabled = "ANALYSIS_ARCHIVER_ENABLED"
+	EnvDiscoveryLabel          = "DISCOVERY_LABEL"
+	EnvLogMaster               = "LOG_MASTER"
+	EnvLogMigration            = "LOG_MIGRATION"
+	EnvLogWeb                  = "LOG_WEB"
+	EnvLogReaper               = "LOG_REAPER"
+	EnvLogTask                 = "LOG_TASK"
+	EnvLogAuth                 = "LOG_AUTH"
+	EnvLogHeap                 = "LOG_HEAP"
+	EnvLogCmd                  = "LOG_CMD"
+	EnvLogSsh                  = "LOG_SSH"
+	EnvLogScm                  = "LOG_SCM"
+)
+
+type Hub struct {
+	// build version.
+	Build string
+	// k8s namespace.
+	Namespace string
+	// API settings.
+	API struct {
+		Port int
+	}
+	// DB settings.
+	DB struct {
+		Path          string
+		MaxConnection int
+		SeedPath      string
+	}
+	// Bucket settings.
+	Bucket struct {
+		Path string
+		TTL  time.Duration
+	}
+	// File settings.
+	File struct {
+		TTL time.Duration
+	}
+	// Cache settings.
+	Cache struct {
+		RWX bool
+		PVC string
+	}
+	// Encryption settings.
+	Encryption struct {
+		Passphrase string
+	}
+	// Task
+	Task struct {
+		SA            string
+		Retries       int
+		TokenLifespan time.Duration
+		Reaper        struct {
+			Created   time.Duration
+			Succeeded time.Duration
+			Failed    time.Duration
+		}
+		Pod struct {
+			Quota     int
+			Retention struct {
+				Succeeded time.Duration
+				Failed    time.Duration
+			}
+		}
+		UID int64
+	}
+	// Frequency
+	Frequency struct {
+		Task   time.Duration
+		Reaper time.Duration
+		Heap   time.Duration
+	}
+	// Development environment
+	Development bool
+	// Frontend settings.
+	Frontend struct {
+		AuthDist string
+	}
+	// Product - deployed as product.
+	Product bool
+	// Disconnected indicates no cluster.
+	Disconnected bool
+	// Analysis settings.
+	Analysis struct {
+		ReportPath      string
+		ArchiverEnabled bool
+	}
+	// Discovery settings.
+	Discovery struct {
+		Label string
+	}
+	// Logging settings
+	Log struct {
+		Master    int
+		Migration int
+		Web       int
+		Reaper    int
+		Task      int
+		Heap      int
+		Auth      int
+		Command   int
+		SCM       int
+		SSH       int
+	}
+}
+
+func (r *Hub) Load() (err error) {
+	var found bool
+	r.Build, err = r.build()
+	if err != nil {
+		return
+	}
+	r.Namespace, err = r.namespace()
+	if err != nil {
+		return
+	}
+	r.DB.Path, found = os.LookupEnv(EnvDbPath)
+	if !found {
+		r.DB.Path = "/tmp/tackle.db"
+	}
+	s, found := os.LookupEnv(EnvAPIPort)
+	if found {
+		r.API.Port, err = strconv.Atoi(s)
+	} else {
+		r.API.Port = 8080
+	}
+	s, found = os.LookupEnv(EnvDbMaxCon)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.DB.MaxConnection = n
+	} else {
+		r.DB.MaxConnection = 1
+	}
+	r.DB.SeedPath, found = os.LookupEnv(EnvDbSeedPath)
+	if !found {
+		r.DB.SeedPath = "/tmp/seed"
+	}
+	r.Bucket.Path, found = os.LookupEnv(EnvBucketPath)
+	if !found {
+		r.Bucket.Path = "/tmp/bucket"
+	}
+	s, found = os.LookupEnv(EnvRwxSupported)
+	if found {
+		b, _ := strconv.ParseBool(s)
+		r.Cache.RWX = b
+	}
+	r.Cache.PVC, found = os.LookupEnv(EnvCachePvc)
+	if !found {
+		r.Cache.PVC = "cache"
+	}
+	r.Encryption.Passphrase, found = os.LookupEnv(EnvPassphrase)
+	if !found {
+		r.Encryption.Passphrase = "tackle"
+	}
+	s, found = os.LookupEnv(EnvTaskReapCreated)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Reaper.Created = time.Duration(n) * time.Minute
+	} else {
+		r.Task.Reaper.Created = 4320 * time.Minute // 72 hours.
+	}
+	s, found = os.LookupEnv(EnvTaskReapSucceeded)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Reaper.Succeeded = time.Duration(n) * time.Minute
+	} else {
+		r.Task.Reaper.Succeeded = 4320 * time.Minute // 72 hours.
+	}
+	s, found = os.LookupEnv(EnvTaskReapFailed)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Reaper.Failed = time.Duration(n) * time.Minute
+	} else {
+		r.Task.Reaper.Failed = 43200 * time.Minute // 720 hours (30 days).
+	}
+	s, found = os.LookupEnv(EnvTaskPodQuota)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Pod.Quota = n
+	} else {
+		r.Task.Pod.Quota = 0 // 0=disabled
+	}
+	s, found = os.LookupEnv(EnvTaskPodRetainSucceeded)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Pod.Retention.Succeeded = time.Duration(n) * time.Minute
+	} else {
+		r.Task.Pod.Retention.Succeeded = 1 * time.Minute
+	}
+	s, found = os.LookupEnv(EnvTaskPodRetainFailed)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Pod.Retention.Failed = time.Duration(n) * time.Minute
+	} else {
+		r.Task.Pod.Retention.Failed = 4320 * time.Minute // 72 hours.
+	}
+	r.Task.SA, found = os.LookupEnv(EnvTaskSA)
+	if !found {
+		r.Task.SA = "tackle-hub"
+	}
+	s, found = os.LookupEnv(EnvTaskRetries)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Task.Retries = n
+	} else {
+		r.Task.Retries = 1
+	}
+	s, found = os.LookupEnv(EnvFrequencyTask)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Frequency.Task = time.Duration(n) * time.Second
+	} else {
+		r.Frequency.Task = 1 * time.Second
+	}
+	s, found = os.LookupEnv(EnvFrequencyReaper)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Frequency.Reaper = time.Duration(n) * time.Minute
+	} else {
+		r.Frequency.Reaper = 1 * time.Minute
+	}
+	s, found = os.LookupEnv(EnvFrequencyHeap)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Frequency.Heap = time.Duration(n) * time.Second
+	} else {
+		r.Frequency.Heap = 240 * time.Second // 4 minutes.
+	}
+	s, found = os.LookupEnv(EnvTaskUid)
+	if found {
+		var uid int64
+		uid, err = strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return
+		}
+		r.Task.UID = uid
+	} else {
+		var uid int64
+		var hubUser *user.User
+		hubUser, err = user.Current()
+		if err != nil {
+			return
+		}
+		uid, err = strconv.ParseInt(hubUser.Uid, 10, 64)
+		if err != nil {
+			return
+		}
+		r.Task.UID = uid
+	}
+	s, found = os.LookupEnv(EnvTaskTokenLifespan)
+	if found {
+		var n int
+		n, err = strconv.Atoi(s)
+		if err != nil {
+			err = liberr.Wrap(err)
+			return
+		}
+		n = max(1, n)
+		r.Task.TokenLifespan = time.Duration(n) * time.Hour
+	} else {
+		r.Task.TokenLifespan = time.Hour * 72 // 3 days.
+	}
+	s, found = os.LookupEnv(EnvDisconnected)
+	if found {
+		b, _ := strconv.ParseBool(s)
+		r.Disconnected = b
+	}
+	s, found = os.LookupEnv(EnvDevelopment)
+	if found {
+		b, _ := strconv.ParseBool(s)
+		r.Development = b
+	}
+	s, found = os.LookupEnv(EnvFrontendAuthDist)
+	if found {
+		r.Frontend.AuthDist = s
+	}
+	s, found = os.LookupEnv(EnvBucketTTL)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Bucket.TTL = time.Duration(n) * time.Minute
+	} else {
+		r.Bucket.TTL = 1 * time.Minute
+	}
+	s, found = os.LookupEnv(EnvFileTTL)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.File.TTL = time.Duration(n) * time.Minute
+	} else {
+		r.File.TTL = 720 * time.Minute // 12 hours.
+	}
+	s, found = os.LookupEnv(EnvAppName)
+	if found {
+		r.Product = !(s == "" || s == "tackle")
+	}
+	r.Analysis.ReportPath, found = os.LookupEnv(EnvAnalysisReportPath)
+	if !found {
+		r.Analysis.ReportPath = "/tmp/analysis/report"
+	}
+	s, found = os.LookupEnv(EnvAnalysisArchiverEnabled)
+	if found {
+		b, _ := strconv.ParseBool(s)
+		r.Analysis.ArchiverEnabled = b
+	} else {
+		r.Analysis.ArchiverEnabled = true
+	}
+	s, found = os.LookupEnv(EnvDiscoveryLabel)
+	if found {
+		r.Discovery.Label = s
+	} else {
+		r.Discovery.Label = "konveyor.io/discovery"
+	}
+	s, found = os.LookupEnv(EnvLogMaster)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Master = n
+	}
+	s, found = os.LookupEnv(EnvLogMigration)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Migration = n
+	} else {
+		r.Log.Migration = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogWeb)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Web = n
+	} else {
+		r.Log.Web = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogReaper)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Reaper = n
+	} else {
+		r.Log.Reaper = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogTask)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Task = n
+	} else {
+		r.Log.Task = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogHeap)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Heap = n
+	} else {
+		r.Log.Heap = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogAuth)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Auth = n
+	} else {
+		r.Log.Auth = max(r.Log.Master, 1)
+	}
+	s, found = os.LookupEnv(EnvLogCmd)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.Command = n
+	} else {
+		r.Log.Command = r.Log.Master
+	}
+	s, found = os.LookupEnv(EnvLogSsh)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.SSH = n
+	} else {
+		r.Log.SSH = max(r.Log.Master, 1)
+	}
+	s, found = os.LookupEnv(EnvLogScm)
+	if found {
+		n, _ := strconv.Atoi(s)
+		r.Log.SCM = n
+	} else {
+		r.Log.SCM = max(r.Log.Master, 1)
+	}
+	return
+}
+
+// namespace determines the namespace.
+func (r *Hub) namespace() (ns string, err error) {
+	ns, found := os.LookupEnv(EnvNamespace)
+	if found {
+		return
+	}
+	path := "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+	b, err := os.ReadFile(path)
+	if err == nil {
+		ns = string(b)
+		return
+	}
+	if os.IsNotExist(err) {
+		ns = "konveyor-tackle"
+		err = nil
+	}
+
+	return
+}
+
+// build returns the hub build version.
+// This is expected to be the output of `git describe`.
+// Examples:
+//
+//	v0.6.0-ea89gcd
+//	v0.6.0
+func (r *Hub) build() (version string, err error) {
+	version, found := os.LookupEnv(EnvBuild)
+	if found {
+		return
+	}
+	f, err := os.Open("/etc/hub-build")
+	if err != nil {
+		if os.IsNotExist(err) {
+			err = nil
+			return
+		}
+	}
+	defer func() {
+		_ = f.Close()
+	}()
+	scanner := bufio.NewScanner(f)
+	if scanner.Scan() {
+		version = scanner.Text()
+	}
+	return
+}

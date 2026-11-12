@@ -1,0 +1,80 @@
+# Per-product CVE configuration for the jira-watcher: Jira project, release
+# streams, and the pscomponent (product image) -> source repository map.
+#   products.<name>:
+#     jiraProject: Jira project key searched each poll
+#     owner: fallback assignee email when the ticket's stream is unknown
+#     mainBranch: branch for main-line analysis (default: main)
+#     streams.<stream>: branch / fixVersion / owner for one release stream
+#     images.<pscomponent>: one image's source and policy
+#       repo / repos: one or more repository URLs built into the image
+#       branch: checkout branch (default: the repository's default)
+#       mainBranch: overrides the product's mainBranch for this image
+#       remediation: report | script | agent (default: agent)
+#         report - analyze and triage only, never touch the repository
+#         script - renovate-style bump only; never escalate to an agent
+#         agent  - scripted bump, escalating to an AgentRun when needed
+#       autoClose: close the JIRA ticket when the verdict is not-affected
+# This ConfigMap is only a SEED. The authoritative configuration is the
+# `bridge:component-map` fact on the `cve-remediation-config` marker
+# application; once a valid fact exists the ConfigMap is never compared to it,
+# so `kubectl apply` of this file does NOT change a running configuration.
+# Day-to-day edits go through the CVE Remediation admin UI. To reset to the
+# seed, delete the fact (or the marker application); the bridge re-seeds from
+# this ConfigMap on the next poll.
+#
+# Owner emails are NOT committed: replace OWNER_EMAIL_PLACEHOLDER with the
+# stream owner's email at deploy time.
+#
+# VERIFICATION MODE: only the demo image is seeded. Add the real product
+# images via the CVE Remediation admin UI once their repository URLs are
+# confirmed (editing this seed only affects a fresh or reset install).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cve-component-map
+  namespace: openshift-mta
+data:
+  image-map.yaml: |
+    products:
+      mta:
+        # CUTOVER NOTES (stream mappings):
+        # - Applications are now named <repo>-<branch>. Apps created before
+        #   this change tracked the repo's default branch with no suffix, so
+        #   a [mta-8.2] ticket whose stream branch is main creates a NEW
+        #   mta-cve-demo-main app instead of adopting the existing
+        #   mta-cve-demo app. Retire the old app or accept a fresh SBOM and
+        #   remediation (a duplicate PR is possible).
+        # - A ticket without the trailing [stream] suffix dead-ends as
+        #   unknown-stream (noted once and assigned to the product owner).
+        # - The demo stream's branch is main, so the main gate (which skips
+        #   when the stream app already is main) can never fire here;
+        #   verifying it needs a stream whose branch is not main.
+        # - fixVersion is set once, when a ticket is first dispatched (a
+        #   finding that already exists — e.g. an app stamped before this
+        #   change — never gets one), and a failed edit is not retried.
+        jiraProject: MTA
+        owner: OWNER_EMAIL_PLACEHOLDER
+        mainBranch: main
+        streams:
+          mta-8.2:
+            branch: main
+            fixVersion: "MTA 8.2.4"
+            owner: OWNER_EMAIL_PLACEHOLDER
+        images:
+          demo/mta-cve-demo:
+            repo: https://github.com/dymurray/mta-cve-demo.git
+            remediation: agent
+            autoClose: true
+      cnv:
+        jiraProject: CNV
+        owner: OWNER_EMAIL_PLACEHOLDER
+        # <pending user-supplied repos>
+        # streams:
+        #   cnv-4.22:
+        #     branch: <user-supplied>
+        #     fixVersion: "CNV v4.22.z"
+        #     owner: OWNER_EMAIL_PLACEHOLDER
+        # images:
+        #   <user-supplied component>:
+        #     repo: <user-supplied repo>
+        #     remediation: agent

@@ -1,0 +1,17 @@
+# Pre-created so the chart's pre-install migrate-db hook (which mounts the
+# filesystem storage) can schedule; Helm adopts it via the ownership metadata.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: storage
+  namespace: trusted-profile-analyzer
+  labels:
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    meta.helm.sh/release-name: redhat-trusted-profile-analyzer
+    meta.helm.sh/release-namespace: trusted-profile-analyzer
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 32Gi

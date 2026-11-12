@@ -1,0 +1,85 @@
+# RHTPA "Helm with Red Hat services" values (Deployment Guide, Appendix B),
+# adapted for a single-node cluster: filesystem storage instead of ODF S3,
+# in-namespace PostgreSQL, RHBK realm "trustify", and the router CA as a trust
+# anchor because the ingress certificate is self-signed.
+appDomain: -trusted-profile-analyzer.apps.mta-cve.mg.dog8code.com
+
+ingress:
+  className: openshift-default
+  additionalAnnotations:
+    haproxy.router.openshift.io/timeout: 5m
+
+tls:
+  additionalTrustAnchor: /etc/trust-anchor/tls.crt
+
+extraVolumes:
+  - name: trust-anchor
+    configMap:
+      name: rhtpa-trust-anchor
+
+extraVolumeMounts:
+  - name: trust-anchor
+    readOnly: true
+    mountPath: /etc/trust-anchor
+
+storage:
+  type: filesystem
+  size: 32Gi
+
+database:
+  sslMode: disable
+  host:
+    valueFrom: {secretKeyRef: {name: postgresql-credentials, key: db.host}}
+  port:
+    valueFrom: {secretKeyRef: {name: postgresql-credentials, key: db.port}}
+  name:
+    valueFrom: {secretKeyRef: {name: postgresql-credentials, key: db.name}}
+  username:
+    valueFrom: {secretKeyRef: {name: postgresql-credentials, key: db.user}}
+  password:
+    valueFrom: {secretKeyRef: {name: postgresql-credentials, key: db.password}}
+
+createDatabase:
+  name:
+    valueFrom: {secretKeyRef: {name: postgresql-admin-credentials, key: db.name}}
+  username:
+    valueFrom: {secretKeyRef: {name: postgresql-admin-credentials, key: db.user}}
+  password:
+    valueFrom: {secretKeyRef: {name: postgresql-admin-credentials, key: db.password}}
+
+migrateDatabase:
+  username:
+    valueFrom: {secretKeyRef: {name: postgresql-admin-credentials, key: db.user}}
+  password:
+    valueFrom: {secretKeyRef: {name: postgresql-admin-credentials, key: db.password}}
+
+oidc:
+  issuerUrl: https://sso-trusted-profile-analyzer.apps.mta-cve.mg.dog8code.com/realms/trustify
+  clients:
+    frontend:
+      clientId: frontend
+    cli:
+      clientId: cli
+      clientSecret:
+        valueFrom: {secretKeyRef: {name: oidc-cli, key: client-secret}}
+
+modules:
+  server:
+    # Burstable: 500m/3Gi requests left the server pod Pending next to the
+    # zone-pinned storage PVC on this memory-tight cluster.
+    resources:
+      requests: {cpu: 100m, memory: 2Gi}
+  importer:
+    concurrency: 3
+    resources:
+      requests: {cpu: 100m, memory: 1Gi}
+    workingDirectory:
+      size: 32Gi
+  createDatabase:
+    enabled: true
+    image:
+      registry: registry.redhat.io/rhel9
+      name: postgresql-16
+      version: latest
+  migrateDatabase:
+    enabled: true

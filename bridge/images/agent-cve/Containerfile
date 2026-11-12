@@ -1,0 +1,34 @@
+# CVE-remediation agent for Java/Maven, Go and Python: the RHEL10 agent
+# runtime (goose + migration harness) from agent-migiq, plus JDK 21, Maven, Go,
+# Python 3 (pip, uv, Poetry, pytest) and
+# rgctl 0.4.21 so the agent can run the rgctl skill (rgctl needs glibc >= 2.39,
+# which RHEL9 lacks).
+FROM quay.io/dymurray/agent-migiq:latest
+USER 0
+RUN dnf -y install java-21-openjdk-devel maven-openjdk21 golang python3 python3-pip && dnf clean all
+RUN python3 -m pip install --no-cache-dir --prefix /usr/local uv==0.5.11 poetry==2.1.1 pytest==8.3.4
+ENV GOTOOLCHAIN=local
+ARG RGCTL_VERSION=0.4.21
+ARG RGCTL_SHA256=9d7673546a3fd6187c389f4e2afe85479340c26e2ac8668137687d8dda5afbdc
+RUN curl -sSfL -o /tmp/rgctl.tgz \
+      https://github.com/sshaaf/rgctl/releases/download/v${RGCTL_VERSION}/rgctl-${RGCTL_VERSION}-x86_64-unknown-linux-gnu.tar.gz && \
+    echo "${RGCTL_SHA256}  /tmp/rgctl.tgz" | sha256sum -c - && \
+    tar -xzf /tmp/rgctl.tgz -C /usr/local/bin rgctl && rm /tmp/rgctl.tgz && \
+    rgctl --version
+# Bazel (bazelisk; the Bazel version comes from the repository's
+# .bazelversion) for repositories that commit generated BUILD files in
+# vendor/, such as kubevirt (hack/bazel-generate.sh).
+ARG BAZELISK_VERSION=1.25.0
+ARG BAZELISK_SHA256=fd8fdff418a1758887520fa42da7e6ae39aefc788cf5e7f7bb8db6934d279fc4
+RUN curl -sSfL -o /usr/local/bin/bazelisk \
+      https://github.com/bazelbuild/bazelisk/releases/download/v${BAZELISK_VERSION}/bazelisk-linux-amd64 && \
+    echo "${BAZELISK_SHA256}  /usr/local/bin/bazelisk" | sha256sum -c - && \
+    chmod 0755 /usr/local/bin/bazelisk && ln -s bazelisk /usr/local/bin/bazel
+# A migration-harness built by hack/build-agent.sh (HARNESS_SRC), e.g. with
+# HARNESS_PUSH_URL support; bin/ only holds .gitkeep otherwise.
+COPY bin/ /opt/migration-harness/bin/
+# The sandbox's /tmp is an emptyDir capped at 1Gi; Go's build work dirs and
+# test binaries for a repository like kubevirt (and Bazel's temp files)
+# exceed it and the kubelet evicts the pod. /workspace (the clone) has 10Gi.
+ENV TMPDIR=/workspace GOTMPDIR=/workspace
+USER 1001

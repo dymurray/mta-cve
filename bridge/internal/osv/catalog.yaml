@@ -1,0 +1,69 @@
+# Method-level vulnerability data for `rgctl vuln analyze`.
+#
+# Most published OSV/CSAF advisories (GitHub, Red Hat) name the affected package
+# but not the vulnerable classes/methods. Without them rgctl cannot tell whether
+# the application reaches the vulnerable code, so entries here are merged into
+# the advisory's affected[].ecosystem_specific before analysis. Advisories that
+# already carry affected_methods are used as published.
+#
+#   ids:      CVE and advisory ids/aliases this entry applies to
+#   package:  OSV package name (Maven: groupId:artifactId)
+#   affected_classes / affected_methods: fully-qualified vulnerable entry points
+#   trigger_condition: when the vulnerable behavior is triggered
+- ids: [CVE-2022-1471, GHSA-mjmj-j48q-9wg2]
+  package: org.yaml:snakeyaml
+  affected_classes:
+    - org.yaml.snakeyaml.Yaml
+    - org.yaml.snakeyaml.constructor.Constructor
+  affected_methods:
+    - org.yaml.snakeyaml.Yaml.load
+    - org.yaml.snakeyaml.Yaml.loadAs
+    - org.yaml.snakeyaml.Yaml.loadAll
+  trigger_condition: >-
+    Untrusted YAML deserialized with a Constructor that allows global tags
+    (the default before 2.0) can instantiate arbitrary classes.
+
+- ids: [CVE-2022-42889, GHSA-599f-7c49-w659]
+  package: org.apache.commons:commons-text
+  affected_classes:
+    - org.apache.commons.text.StringSubstitutor
+    - org.apache.commons.text.lookup.StringLookupFactory
+  affected_methods:
+    - org.apache.commons.text.lookup.StringLookupFactory.interpolatorStringLookup
+    - org.apache.commons.text.StringSubstitutor.createInterpolator
+    - org.apache.commons.text.StringSubstitutor.replace
+  trigger_condition: >-
+    Interpolating attacker-influenced strings with the default interpolator
+    evaluates script:, dns: and url: lookups.
+
+- ids: [CVE-2025-48924, GHSA-j288-q9x7-2f5v]
+  package: org.apache.commons:commons-lang3
+  affected_classes:
+    - org.apache.commons.lang3.ClassUtils
+  affected_methods:
+    - org.apache.commons.lang3.ClassUtils.getClass
+  trigger_condition: >-
+    Very long class-name input to ClassUtils.getClass recurses until a
+    StackOverflowError terminates the application.
+
+# Go: methods are written <import path>.<Func> or <import path>.<Type>.<Method>.
+- ids: [CVE-2022-32149, GHSA-69ch-w2m2-3vjp, GO-2022-1059]
+  package: golang.org/x/text
+  affected_methods:
+    - golang.org/x/text/language.ParseAcceptLanguage
+    - golang.org/x/text/language.MatchStrings
+  trigger_condition: >-
+    A crafted Accept-Language header with many tags makes ParseAcceptLanguage
+    take excessive time (denial of service).
+
+- ids: [CVE-2025-30204, GHSA-mh63-6h87-95cp, GO-2025-3553]
+  package: github.com/golang-jwt/jwt
+  affected_classes:
+    - github.com/golang-jwt/jwt.Parser
+  affected_methods:
+    - github.com/golang-jwt/jwt.Parse
+    - github.com/golang-jwt/jwt.ParseWithClaims
+    - github.com/golang-jwt/jwt.Parser.ParseUnverified
+  trigger_condition: >-
+    A token header with many period characters makes header parsing allocate
+    O(n) memory per request (denial of service).

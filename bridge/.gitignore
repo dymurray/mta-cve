@@ -1,0 +1,8 @@
+.secrets.env
+bin/
+.superpowers/
+/cmd/cve-remediation/cve-remediation
+/cmd/cve-watcher/cve-watcher
+/cmd/sbom-discovery/sbom-discovery
+/cmd/nightly-refresh/nightly-refresh
+/images/agent-cve/bin/migration-harness

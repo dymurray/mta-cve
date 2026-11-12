@@ -1,0 +1,55 @@
+# jira-watcher bridges prodsec CVE tickets (projects named in the map, found by their
+# pscomponent label) into MTA applications and cve-remediation tasks, and
+# comments every finding state change back on the ticket. The image -> repo
+# mapping is the cve-component-map ConfigMap (51-component-map.yaml), mounted
+# at /etc/jira-watch and re-read every poll.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: jira-watcher
+  namespace: openshift-mta
+  labels: {app: jira-watcher}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app: jira-watcher}
+  template:
+    metadata:
+      labels: {app: jira-watcher}
+    spec:
+      containers:
+        - name: watcher
+          image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+          imagePullPolicy: Always
+          command: [/usr/bin/jira-watcher]
+          env:
+            - {name: HUB_BASE_URL, value: "http://mta-hub.openshift-mta.svc:8080"}
+            - {name: JIRA_POLL, value: 60s}
+            - {name: IMAGE_MAP_PATH, value: /etc/jira-watch/image-map.yaml}
+            - {name: MTA_UI_URL, value: "https://mta-openshift-mta.apps.mta-cve.mg.dog8code.com"}
+            # Auto-close ("Closed") not-affected tickets whose image allows it;
+            # unset to keep every ticket open for a human. (The MTA workflow
+            # has no "Done": its terminal transition is "Closed".)
+            - {name: JIRA_AUTOCLOSE_TRANSITION, value: Closed}
+            # Move the ticket to "POST" when the remediation pull request
+            # opens (fix posted, awaiting merge); unset to comment only.
+            - {name: JIRA_PR_TRANSITION, value: POST}
+            # The konveyor-cves archetype's criteria tag cve-remediation
+            # lives in the "Security" category (tag identity is
+            # name+category): created apps must reuse it to join the
+            # archetype.
+            - {name: JIRA_TAG_CATEGORY, value: Security}
+            - {name: DRY_RUN, value: "false"}
+            - {name: HOME, value: /tmp}
+          envFrom:
+            - secretRef: {name: hub-bridge-token}
+            - secretRef: {name: jira-credentials}
+          volumeMounts:
+            - {name: component-map, mountPath: /etc/jira-watch, readOnly: true}
+          resources:
+            requests: {cpu: 50m, memory: 64Mi}
+            limits: {memory: 256Mi}
+      volumes:
+        - name: component-map
+          configMap: {name: cve-component-map}

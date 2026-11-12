@@ -1,0 +1,228 @@
+# migiq migration demo: SkillCards for the six vendored migiq skills
+# (sshaaf/migiq, served from the mta-cve-skills image because the repo is
+# private and SkillCard git-source clones are anonymous), the four stage
+# agents, and the migiq-migration-multistage workflow
+# (plan -> execute -> containerize -> deploy).
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-prompt-builder
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ Prompt Builder
+  description: >-
+    Builds migration prompts from the rgctl code graph and migration
+    context (MigIQ phase 0).
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-prompt-builder
+  tags: [migration, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-plan
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ Migration Plan
+  description: >-
+    Creates comprehensive migration plans for application modernization
+    projects.
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-plan
+  tags: [migration, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-execute
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ Execute
+  description: >-
+    Executes migration plan tasks against the application source.
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-execute
+  tags: [migration, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-containerize
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ Containerize
+  description: >-
+    Containerizes the migrated application.
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-containerize
+  tags: [migration, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-deploy
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ Deploy
+  description: >-
+    Produces deployment artifacts for the migrated application.
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-deploy
+  tags: [migration, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: SkillCard
+metadata:
+  name: mig-rgctl
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  displayName: MigIQ rgctl
+  description: >-
+    MigIQ-specific code knowledge graph analysis using rgctl: indexing,
+    graph artifact validation, and structure queries per MigIQ phase.
+  type: skill
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  subPath: mig-rgctl
+  tags: [migration, rgctl, migiq]
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migiq-planner
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: mig-prompt-builder
+    - ref: mig-plan
+    - ref: mig-rgctl
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are the MigIQ planning agent. Use the mig-prompt-builder skill to
+    build the prompt from the rgctl code graph, then the mig-plan skill to
+    produce the migration plan (migration_plan.json) for the application
+    identified by APP_ID. Use mig-rgctl for graph indexing and queries.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migiq-executor
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: mig-execute
+    - ref: mig-rgctl
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are the MigIQ execution agent. Execute the tasks from the migration
+    plan produced by the planner stage, using the mig-execute skill and
+    mig-rgctl for code graph queries. Commit your work on the TARGET_BRANCH.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migiq-containerizer
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: mig-containerize
+    - ref: mig-rgctl
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are the MigIQ containerization agent. Containerize the migrated
+    application per the mig-containerize skill, continuing on TARGET_BRANCH.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: Agent
+metadata:
+  name: migiq-deployer
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  gitConfig:
+    userName: Dylan Murray
+    userEmail: dymurray@redhat.com
+  gateways:
+    - ref: enmaas
+  skillCards:
+    - ref: mig-deploy
+    - ref: mig-rgctl
+  execution:
+    maxTurns: 150
+  prompt: |
+    You are the MigIQ deployment agent. Produce the deployment artifacts
+    per the mig-deploy skill, continuing on TARGET_BRANCH.
+---
+apiVersion: konveyor.io/v1alpha1
+kind: AgentWorkflow
+metadata:
+  name: migiq-migration-multistage
+  namespace: openshift-mta
+  labels:
+    app.kubernetes.io/managed-by: mta-rhtpa-bridge
+    konveyor.io/managed: "true"
+spec:
+  stages:
+    - name: plan
+      agentRef: migiq-planner
+    - name: execute
+      agentRef: migiq-executor
+    - name: containerize
+      agentRef: migiq-containerizer
+    - name: deploy
+      agentRef: migiq-deployer
