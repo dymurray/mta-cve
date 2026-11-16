@@ -1,17 +1,17 @@
 # CVE-remediation agent for Java/Maven, Go and Python: the RHEL10 agent
 # runtime (goose + migration harness) from agent-migiq, plus JDK 21, Maven, Go,
 # Python 3 (pip, uv, Poetry, pytest) and
-# rgctl 0.4.21 so the agent can run the rgctl skill (rgctl needs glibc >= 2.39,
-# which RHEL9 lacks).
+# rgctl 0.4.27 so the agent can run the rgctl skill (static musl build: the
+# gnu build of 0.4.27 requires glibc >= 2.43, newer than any UBI/RHEL).
 FROM quay.io/dymurray/agent-migiq:latest
 USER 0
 RUN dnf -y install java-21-openjdk-devel maven-openjdk21 golang python3 python3-pip && dnf clean all
 RUN python3 -m pip install --no-cache-dir --prefix /usr/local uv==0.5.11 poetry==2.1.1 pytest==8.3.4
 ENV GOTOOLCHAIN=local
-ARG RGCTL_VERSION=0.4.21
-ARG RGCTL_SHA256=9d7673546a3fd6187c389f4e2afe85479340c26e2ac8668137687d8dda5afbdc
+ARG RGCTL_VERSION=0.4.27
+ARG RGCTL_SHA256=7cc3e7a94fe76d61101505e558fc1ca0dc385236b112d688daed9a76b1ce3fab
 RUN curl -sSfL -o /tmp/rgctl.tgz \
-      https://github.com/sshaaf/rgctl/releases/download/v${RGCTL_VERSION}/rgctl-${RGCTL_VERSION}-x86_64-unknown-linux-gnu.tar.gz && \
+      https://github.com/sshaaf/rgctl/releases/download/v${RGCTL_VERSION}/rgctl-${RGCTL_VERSION}-x86_64-unknown-linux-musl.tar.gz && \
     echo "${RGCTL_SHA256}  /tmp/rgctl.tgz" | sha256sum -c - && \
     tar -xzf /tmp/rgctl.tgz -C /usr/local/bin rgctl && rm /tmp/rgctl.tgz && \
     rgctl --version

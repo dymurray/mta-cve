@@ -26,11 +26,6 @@ k -n "$MTA_NS" create secret generic jira-credentials \
   --from-literal=JIRA_EMAIL="$JIRA_EMAIL" \
   --from-literal=JIRA_TOKEN="$JIRA_TOKEN" \
   --dry-run=client -o yaml | k apply -f -
-# LLM gateway key (deploy/mta/05-gateway.yaml references secret 'enmaas-key').
-: "${LLM_API_KEY:?LLM_API_KEY missing from .secrets.env (the LLM endpoint key for the agents)}"
-k -n "$MTA_NS" create secret generic enmaas-key \
-  --from-literal=api-key="$LLM_API_KEY" \
-  --dry-run=client -o yaml | k apply -f -
 k apply -f deploy/networkpolicy.yaml
 k apply -f deploy/mta/
 k -n "$MTA_NS" rollout restart deploy/cve-watcher deploy/jira-watcher

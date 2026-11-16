@@ -2,6 +2,8 @@ package osv
 
 import (
 	"os"
+
+	"github.com/dymurray/mta-rhtpa-bridge/internal/finding"
 	"path/filepath"
 	"testing"
 )
@@ -33,7 +35,7 @@ func TestAnalyzeRepo(t *testing.T) {
 		}
 		p := filepath.Join(t.TempDir(), "osv.json")
 		_ = os.WriteFile(p, enriched, 0644)
-		re, _, err := r.Analyze(p, src, entry, true)
+		re, _, err := r.Analyze(p, src, entry, true, finding.EcosystemMaven)
 		if err != nil {
 			t.Fatal(err)
 		}

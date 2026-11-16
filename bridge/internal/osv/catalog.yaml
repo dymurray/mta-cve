@@ -46,24 +46,33 @@
     Very long class-name input to ClassUtils.getClass recurses until a
     StackOverflowError terminates the application.
 
-# Go: methods are written <import path>.<Func> or <import path>.<Type>.<Method>.
-- ids: [CVE-2022-32149, GHSA-69ch-w2m2-3vjp, GO-2022-1059]
+# Go: rgctl resolves sinks by bare symbol name; never prefix with the module path.
+- ids: [CVE-2022-32149, CVE-2026-56851, CVE-2026-56852, GHSA-69ch-w2m2-3vjp, GO-2022-1059]
   package: golang.org/x/text
+  affected_classes:
+    - golang.org/x/text/language
   affected_methods:
-    - golang.org/x/text/language.ParseAcceptLanguage
-    - golang.org/x/text/language.MatchStrings
+    - ParseAcceptLanguage
   trigger_condition: >-
-    A crafted Accept-Language header with many tags makes ParseAcceptLanguage
-    take excessive time (denial of service).
+    Parsing an attacker-controlled Accept-Language header can consume
+    excessive CPU and memory (denial of service).
 
 - ids: [CVE-2025-30204, GHSA-mh63-6h87-95cp, GO-2025-3553]
   package: github.com/golang-jwt/jwt
   affected_classes:
-    - github.com/golang-jwt/jwt.Parser
+    - github.com/golang-jwt/jwt
   affected_methods:
-    - github.com/golang-jwt/jwt.Parse
-    - github.com/golang-jwt/jwt.ParseWithClaims
-    - github.com/golang-jwt/jwt.Parser.ParseUnverified
+    - ParseWithClaims
   trigger_condition: >-
-    A token header with many period characters makes header parsing allocate
-    O(n) memory per request (denial of service).
+    Parsing an attacker-controlled token with a header containing many
+    periods causes excessive memory allocation (denial of service).
+
+- ids: [CVE-2020-8908]
+  package: com.google.guava:guava
+  affected_classes:
+    - com.google.common.io.Files
+  affected_methods:
+    - com.google.common.io.Files.createTempDir
+  trigger_condition: >-
+    Files.createTempDir creates a directory with default permissions in the
+    shared temp directory, exposing its contents to other local users.

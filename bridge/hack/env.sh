@@ -1,5 +1,5 @@
 # Common environment for the RHTPA + MTA CVE demo scripts.
-export KUBECONFIG="${KUBECONFIG_DYLAN:-${KUBECONFIG:-$HOME/.kube/config}}"
+export KUBECONFIG="${KUBECONFIG_DYLAN:-$HOME/.kube/config}"
 export KCTX="${KCTX:-admin}"
 export TPA_NS=trusted-profile-analyzer
 export MTA_NS=openshift-mta

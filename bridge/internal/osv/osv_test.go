@@ -93,7 +93,120 @@ func TestGoSymbols(t *testing.T) {
 	doc := `{"id":"GO-2022-1059","affected":[{"package":{"ecosystem":"Go","name":"golang.org/x/text"},
 	 "ecosystem_specific":{"imports":[{"path":"golang.org/x/text/language","symbols":["ParseAcceptLanguage","MatchStrings"]}]}}]}`
 	out, src, _, err := Enrich([]byte(doc), "CVE-2022-32149", "golang.org/x/text")
-	if err != nil || src != SourceAdvisory || !strings.Contains(string(out), "golang.org/x/text/language.ParseAcceptLanguage") {
+	if err != nil || src != SourceAdvisory || !strings.Contains(string(out), `"ParseAcceptLanguage"`) || strings.Contains(string(out), "language.ParseAcceptLanguage") {
 		t.Errorf("src=%s err=%v out=%s", src, err, out)
+	}
+}
+
+func TestBareGoSymbol(t *testing.T) {
+	for in, want := range map[string]string{
+		"github.com/golang-jwt/jwt.ParseWithClaims":      "ParseWithClaims",
+		"golang.org/x/text/language.ParseAcceptLanguage": "ParseAcceptLanguage",
+		"ParseAcceptLanguage":                            "ParseAcceptLanguage",
+		"github.com/golang-jwt/jwt/v5.ParseWithClaims":   "ParseWithClaims",
+	} {
+		if got := BareGoSymbol(in); got != want {
+			t.Errorf("BareGoSymbol(%q)=%q want %q", in, got, want)
+		}
+	}
+}
+
+func TestGoCatalogEntries(t *testing.T) {
+	cases := []struct{ cve, pkg, method string }{
+		{"CVE-2022-32149", "golang.org/x/text", "ParseAcceptLanguage"},
+		{"CVE-2026-56851", "golang.org/x/text", "ParseAcceptLanguage"},
+		{"CVE-2026-56852", "golang.org/x/text", "ParseAcceptLanguage"},
+		{"CVE-2025-30204", "github.com/golang-jwt/jwt", "ParseWithClaims"},
+		{"CVE-2020-8908", "com.google.guava:guava", "com.google.common.io.Files.createTempDir"},
+	}
+	entries, err := Catalog()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		e := lookup(entries, []string{c.cve}, c.pkg)
+		if e == nil || len(e.AffectedMethods) != 1 || e.AffectedMethods[0] != c.method {
+			t.Errorf("%s: entry=%+v", c.cve, e)
+		}
+	}
+}
+
+func TestInterpretNotExploitableReason(t *testing.T) {
+	re := finding.Reachability{MethodData: SourceCatalog, Exploitability: "not_exploitable", Callers: []string{"main"}}
+	Interpret(&re, true)
+	if re.Verdict != finding.VerdictReachable || !strings.Contains(re.VerdictReason, "not exploitable") {
+		t.Errorf("reachable: %s / %s", re.Verdict, re.VerdictReason)
+	}
+	re = finding.Reachability{MethodData: SourceCatalog, Exploitability: "not_exploitable"}
+	Interpret(&re, true)
+	if re.Verdict != finding.VerdictUnreachable || !strings.Contains(re.VerdictReason, "not exploitable") {
+		t.Errorf("unreachable: %s / %s", re.Verdict, re.VerdictReason)
+	}
+}
+
+func TestAdvisoryGoMethodsNormalized(t *testing.T) {
+	doc := `{"id":"X-1","affected":[{"package":{"ecosystem":"Go","name":"golang.org/x/text"},
+	 "ecosystem_specific":{"affected_methods":["golang.org/x/text/language.ParseAcceptLanguage","MatchStrings"]}}]}`
+	out, src, _, err := Enrich([]byte(doc), "CVE-2022-32149", "golang.org/x/text")
+	if err != nil || src != SourceAdvisory {
+		t.Fatalf("src=%s err=%v", src, err)
+	}
+	var v struct {
+		Affected []struct {
+			ES struct {
+				M []string `json:"affected_methods"`
+			} `json:"ecosystem_specific"`
+		} `json:"affected"`
+	}
+	if err := json.Unmarshal(out, &v); err != nil {
+		t.Fatal(err)
+	}
+	m := v.Affected[0].ES.M
+	if len(m) != 2 || m[0] != "ParseAcceptLanguage" || m[1] != "MatchStrings" {
+		t.Errorf("methods not bare: %v", m)
+	}
+	// Non-Go advisories keep fully-qualified names.
+	java := `{"id":"X-2","affected":[{"package":{"ecosystem":"Maven","name":"g:a"},
+	 "ecosystem_specific":{"affected_methods":["a.b.C.m"]}}]}`
+	out, _, _, _ = Enrich([]byte(java), "CVE-1", "g:a")
+	if !strings.Contains(string(out), "a.b.C.m") {
+		t.Errorf("java methods altered: %s", out)
+	}
+}
+
+func TestGoUnresolvedSinkProvesNothing(t *testing.T) {
+	// rgctl honours .gitignore: a Go repo that gitignores vendor/ has its
+	// vendored dependencies unindexed, the sink comes back unresolved, and
+	// zero callers is not evidence. The verdict must be unknown, not
+	// unreachable (which would mark the CVE not affected).
+	re := finding.Reachability{
+		MethodData:     SourceCatalog,
+		Exploitability: "not_exploitable",
+		SinkResolution: "unresolved",
+	}
+	Interpret(&re, trustedNoCallers(&re, true, finding.EcosystemGolang))
+	if re.Verdict != finding.VerdictUnknown {
+		t.Errorf("verdict %s, want unknown (sink unresolved)", re.Verdict)
+	}
+	// The same shape with a resolved sink keeps proving non-impact.
+	re = finding.Reachability{
+		MethodData:     SourceCatalog,
+		Exploitability: "not_exploitable",
+		SinkResolution: "resolved",
+	}
+	Interpret(&re, trustedNoCallers(&re, true, finding.EcosystemGolang))
+	if re.Verdict != finding.VerdictUnreachable {
+		t.Errorf("verdict %s, want unreachable (sink resolved)", re.Verdict)
+	}
+	// Java is unaffected: dependency jars resolve sinks independently and
+	// an unresolved sink with zero callers still proves non-impact there.
+	re = finding.Reachability{
+		MethodData:     SourceCatalog,
+		Exploitability: "not_exploitable",
+		SinkResolution: "unresolved",
+	}
+	Interpret(&re, trustedNoCallers(&re, true, finding.EcosystemMaven))
+	if re.Verdict != finding.VerdictUnreachable {
+		t.Errorf("java verdict %s, want unreachable", re.Verdict)
 	}
 }

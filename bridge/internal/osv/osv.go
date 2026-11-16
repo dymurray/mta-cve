@@ -119,18 +119,35 @@ func Enrich(doc []byte, cve, pkg string) (out []byte, source string, entry *Entr
 	}
 	affected, _ := v["affected"].([]any)
 	converted := false
+	hasMethods := false
 	for _, a := range affected {
 		m, _ := a.(map[string]any)
 		es, _ := m["ecosystem_specific"].(map[string]any)
 		if methods, ok := es["affected_methods"].([]any); ok && len(methods) > 0 {
-			out, source = doc, SourceAdvisory
-			return
+			hasMethods = true
+			// rgctl resolves Go sinks by bare symbol; strip any path prefix.
+			p, _ := m["package"].(map[string]any)
+			if eco, _ := p["ecosystem"].(string); eco == "Go" {
+				for i, x := range methods {
+					if name, ok := x.(string); ok {
+						if b := BareGoSymbol(name); b != name {
+							methods[i] = b
+							converted = true
+						}
+					}
+				}
+			}
+			continue
 		}
 		// Go vulnerability database format: imports[].{path,symbols}.
 		if methods := goSymbols(es); len(methods) > 0 {
 			es["affected_methods"] = methods
 			converted = true
 		}
+	}
+	if hasMethods && !converted {
+		out, source = doc, SourceAdvisory
+		return
 	}
 	if converted {
 		out, err = json.MarshalIndent(v, "", "  ")
@@ -168,9 +185,24 @@ func Enrich(doc []byte, cve, pkg string) (out []byte, source string, entry *Entr
 	return
 }
 
+// BareGoSymbol strips any module/import-path prefix, leaving the bare symbol
+// ("golang.org/x/text/language.ParseAcceptLanguage" -> "ParseAcceptLanguage").
+// rgctl resolves Go sinks by bare name; path-prefixed names resolve to the
+// wrong nodes with no callers.
+func BareGoSymbol(name string) string {
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if i := strings.LastIndex(name, "."); i >= 0 {
+		name = name[i+1:]
+	}
+	return name
+}
+
 // goSymbols converts Go vulndb ecosystem_specific.imports to rgctl
-// affected_methods ("<import path>.<Symbol>").
+// affected_methods (bare symbol names, deduplicated).
 func goSymbols(es map[string]any) (methods []string) {
+	seen := map[string]bool{}
 	imports, _ := es["imports"].([]any)
 	for _, i := range imports {
 		imp, _ := i.(map[string]any)
@@ -178,7 +210,10 @@ func goSymbols(es map[string]any) (methods []string) {
 		symbols, _ := imp["symbols"].([]any)
 		for _, sym := range symbols {
 			if name, ok := sym.(string); ok && path != "" {
-				methods = append(methods, path+"."+name)
+				if b := BareGoSymbol(name); !seen[b] {
+					seen[b] = true
+					methods = append(methods, b)
+				}
 			}
 		}
 	}
@@ -314,7 +349,7 @@ func (r *Rgctl) json(out any, args ...string) (raw []byte, err error) {
 // Analyze runs `deps check` and `vuln analyze` for the OSV document at path.
 // externalCalls reports whether rgctl records calls into external packages
 // for the ecosystem; without them, "no callers" proves nothing.
-func (r *Rgctl) Analyze(osvPath, methodSource string, entry *Entry, externalCalls bool) (re *finding.Reachability, raw []byte, err error) {
+func (r *Rgctl) Analyze(osvPath, methodSource string, entry *Entry, externalCalls bool, ecosystem string) (re *finding.Reachability, raw []byte, err error) {
 	var deps depsResult
 	_, err = r.json(&deps, "deps", "check", "--osv", osvPath)
 	if err != nil {
@@ -365,19 +400,37 @@ func (r *Rgctl) Analyze(osvPath, methodSource string, entry *Entry, externalCall
 			Products:        st.Products,
 		}
 	}
-	Interpret(re, externalCalls)
+	Interpret(re, trustedNoCallers(re, externalCalls, ecosystem))
 	return
+}
+
+// trustedNoCallers reports whether an empty caller set is evidence that the
+// vulnerable code is not reached. rgctl honours .gitignore: in a Go repo
+// that gitignores vendor/, the vendored dependencies are never indexed, the
+// sink comes back unresolved, and zero callers proves nothing — trusting it
+// would mark a real CVE not affected. Java is unaffected: dependency sinks
+// resolve independently of the repository tree.
+func trustedNoCallers(re *finding.Reachability, externalCalls bool, ecosystem string) bool {
+	if ecosystem != finding.EcosystemGolang {
+		return externalCalls
+	}
+	return externalCalls && re.SinkResolution == "resolved"
 }
 
 // Interpret sets the verdict. rgctl's not_affected is only trusted when it
 // had method-level data and analyzed the call graph; otherwise the effective
 // VEX status is downgraded to under_investigation.
 //
-// externalCalls is false for ecosystems where rgctl does not record calls
-// into external packages (Go in rgctl 0.4.21): a missing caller is then not
-// evidence and the verdict is unknown rather than unreachable.
+// externalCalls is false when rgctl cannot record calls into external
+// packages (Go before analysis-time vendoring, or a Go repo whose gitignored
+// vendor/ left the sink unresolved): a missing caller is then not evidence
+// and the verdict is unknown rather than unreachable.
 func Interpret(re *finding.Reachability, externalCalls bool) {
 	called := len(re.Callers) > 0 || len(re.CallSites) > 0
+	notExploitable := ""
+	if re.Exploitability == "not_exploitable" {
+		notExploitable = " rgctl assessed the code as not exploitable."
+	}
 	switch {
 	case re.Exploitability == "exploitable" || len(re.Paths) > 0:
 		re.Verdict = finding.VerdictExploitable
@@ -390,13 +443,17 @@ func Interpret(re *finding.Reachability, externalCalls bool) {
 		re.VerdictReason = "The dependency is not declared in the project manifests (transitive); RHTPA's resolved SBOM still lists it, so call analysis was skipped."
 	case !called && !externalCalls:
 		re.Verdict = finding.VerdictUnknown
-		re.VerdictReason = "rgctl does not record calls into external packages for this language, so reachability of the vulnerable code cannot be determined."
+		if re.SinkResolution == "unresolved" {
+			re.VerdictReason = "rgctl could not resolve the vulnerable method in the indexed code, so the absence of callers is not evidence."
+		} else {
+			re.VerdictReason = "rgctl does not record calls into external packages for this language, so reachability of the vulnerable code cannot be determined."
+		}
 	case called:
 		re.Verdict = finding.VerdictReachable
-		re.VerdictReason = "The vulnerable methods are called, but no path from external input reaches them."
+		re.VerdictReason = "The vulnerable methods are called, but no path from external input reaches them." + notExploitable
 	default:
 		re.Verdict = finding.VerdictUnreachable
-		re.VerdictReason = "No application code calls the vulnerable methods."
+		re.VerdictReason = "No application code calls the vulnerable methods." + notExploitable
 	}
 	if re.Verdict == finding.VerdictUnknown && re.Vex.Status == "not_affected" {
 		re.VexAdjusted = true

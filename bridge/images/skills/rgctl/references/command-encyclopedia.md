@@ -29,7 +29,6 @@ Prefer the **Canonical** column in examples and agent workflows. Aliases/façade
 | PR call-path review | `review paths` | — |
 | PR policy gate | `review check` | `pr-check` (alias) |
 | Composed review artifact | `review export` | — |
-| Kantra rules | `rules run` | — |
 | Experimental GQL | `gql` | prefer Query verbs above |
 
 `rgctl --help` lists commands under visual groups: Lifecycle · Query · Analysis · Security · Policy · Meta (flat verbs unchanged: `rgctl discover`, not nested).
@@ -49,6 +48,7 @@ Prefer the **Canonical** column in examples and agent workflows. Aliases/façade
 - [clones](#clones)
 - [cpg](#cpg)
 - [check](#check)
+- [vuln analyze](#vuln-analyze)
 - [review](#review)
 - [export](#export)
 - [serve](#serve)
@@ -57,7 +57,7 @@ Prefer the **Canonical** column in examples and agent workflows. Aliases/façade
 
 ## discover
 
-**Command:** `rgctl [-f json] discover [PATH] [-l/--languages CSV] [-e/--exclude GLOB] [-v/--verbose] [--scip PATH.scip] [--with-git] [--git-since DUR] [--with-cfg] [--with-security] [--with-taint] [--with-dashboard] [--with-harmonic] [--export-migration-hints] [--migration-preset NAME] [--migration-order NAME] [--with-ast-skeleton] [--with-dfg-loops] [--write-json-graph] …`
+**Command:** `rgctl [-f json] discover [PATH] [-l/--languages CSV] [-e/--exclude GLOB] [-v/--verbose] [--scip PATH.scip] [--with-git] [--git-since DUR] [--with-cfg] [--with-security] [--with-taint] [--with-universe] [--with-harmonic] [--export-migration-hints] [--migration-preset NAME] [--migration-order NAME] [--with-ast-skeleton] [--with-dfg-loops] [--write-json-graph] …`
 
 **Purpose:** Index the repo once (or after large changes). Writes the default **`RGCL` v2** columnar mmap snapshot (`.rgctl/graph.snapshot.bin`) that agents query.
 
@@ -65,7 +65,7 @@ Prefer the **Canonical** column in examples and agent workflows. Aliases/façade
 
 **Repo targeting:** `rgctl -r /repo discover .` and `rgctl -r /repo discover` resolve to `/repo` (positional `.` does not override `-r` with process cwd). Relative PATH joins `-r`.
 
-**Other flags:** `--languages java,go` restricts the language set; `--exclude` filters paths (glob); `--verbose` prints per-file progress (noisy — skip unless debugging a stuck/slow discover); `--with-kantra` writes Kantra findings; `--write-json-graph` also writes legacy `graph.db`/`graph.json` (rarely needed — snapshot-only is the default).
+**Other flags:** `--languages java,go` restricts the language set; `--exclude` filters paths (glob); `--verbose` prints per-file progress (noisy — skip unless debugging a stuck/slow discover); `--write-json-graph` also writes legacy `graph.db`/`graph.json` (rarely needed — snapshot-only is the default).
 
 **SCIP overlay:** `--scip <PATH.scip>` applies a compiler-exact `.scip` protobuf index (`apply_scip_overlay`, `resolution = "scip"`) to upgrade ambiguous call edges.
 
@@ -110,7 +110,7 @@ rgctl discover . --with-cfg --with-taint   # whole-repo CFG archive (taint / mut
 
 **Command:** `rgctl [-f json] update [PATH] [--files PATH,...] [--since REF] [--cascade-depth N] [--force] [--no-wait] [--wait-timeout SECS] [-l/--languages CSV] [-e/--exclude GLOB]`
 
-**Purpose:** Incremental **structural** graph patch for changed sources. Not a full discover — does not rebuild communities, Kantra, CFG/PDG, or migration plans. Prefer this (or `serve --watch`) over rediscover when the working tree drifts.
+**Purpose:** Incremental **structural** graph patch for changed sources. Not a full discover — does not rebuild communities, CFG/PDG, or migration plans. Prefer this (or `serve --watch`) over rediscover when the working tree drifts.
 
 **Prerequisites:** Existing `.rgctl/` snapshot (`rgctl discover` once).
 
@@ -334,7 +334,7 @@ rgctl -f json slice src/main/java/com/example/ecommerce/service/CartService.java
 
 **Layer flags:** `cfg --prune` drops unreachable blocks before display. `pdg --edge-layer data|control` filters to one dependence type (default `all`); `--def-use` adds def-use variable lists per node. `dom --frontiers` prints dominance frontiers instead of just the tree.
 
-**Sample:**
+**Sample (`cfg` / `pdg`):**
 
 ```json
 {
@@ -367,6 +367,8 @@ rgctl -f json slice src/main/java/com/example/ecommerce/service/CartService.java
 ```
 
 There are **no** `nodes_count` / `edges_count` fields — use `len(nodes)` / `len(edges)`.
+
+**`dom` layer (not `.edges`):** `inspect <SYM> dom` emits immediate dominators in `.idom[]` as `{block, immediate_dominator}` and (with `--frontiers`) dominance frontiers in `.frontiers[]`. Do **not** expect a CFG-style `.edges[]` array on the `dom` layer.
 
 **Pitfalls:** Ambiguous symbols fail; resolve FQN/name carefully. CFG may be **partial** on complex methods (covering only the first branch/entry block) — supplement with source reading if the block count seems low for the method's complexity.
 
@@ -484,7 +486,7 @@ rgctl -f json semantic query "…" [--limit N] [--scope function|community] \
 }
 ```
 
-**Agent should report:** top labels + sizes; use `inventory --by community` for census; explore ownership via `semantic query --scope community` / `blast-radius` (responses may include `community_id`).
+**Agent should report:** top labels + sizes; filter `member_count > 1` for domain clusters (raw lists include singletons); when using `semantic query --scope community`, prefer named clusters (`select(.name | startswith("Community ") | not)`). Use `inventory --by community` for census; explore ownership via `semantic query --scope community` / `blast-radius` (responses may include `community_id`).
 
 ---
 
@@ -677,17 +679,33 @@ rgctl cpg export --format graphson --output cpg.json [--path-contains src/] \
 
 ---
 
+## vuln analyze
+
+**Command:** `rgctl -f json vuln analyze --osv PATH [--include-jars DIR]`
+
+**Purpose:** Orchestrated OSV → deps match → sink-first reachability → OpenVEX. Prefer after `discover . --with-cfg`.
+
+**Key fields:** `.deps_verdict`, `.exploitability`, `.openvex.statements[].status`, and `.sink_taint`:
+- `.sink_taint.call_sites // []` — `{caller, target_method, file, line}` (graph + parked external calls; key omitted when empty)
+- `.sink_taint.paths[]` — `{from, to, hops}` upstream entry → sink summaries
+
+**Pitfalls:** Empty paths with `cfg_available=false` is not PDG proof of safe. Prefer `/rgctl:vuln` for the full triage protocol. Related: `vuln triage`, `deps check`.
+
+**Agent should report:** exploitability + OpenVEX status + concrete `file:line` call sites — not the full envelope.
+
+---
+
 ## review
 
 **Family:** temporal PR analysis under `rgctl review …`.
 
 ### review paths
 
-**Command:** `rgctl -f json review paths [--base-ref REF] [--head-ref REF] [--full-snapshots] [--upstream-depth N] [--downstream-depth N] [--symbol NAME]`
+**Command:** `rgctl -f json review paths [--base-ref REF] [--head-ref REF] [--synthetic-head worktree] [--full-snapshots] [--upstream-depth N] [--downstream-depth N] [--symbol NAME]`
 
 **Purpose:** Before/after call-path report for changed symbols (spines + `path_delta`). Not a policy gate.
 
-**Prerequisites:** Base/head graph snapshots (same prep as `review check` / `pr-check`).
+**Prerequisites:** Base/head graph snapshots (same prep as `review check` / `pr-check`), **or** `--synthetic-head worktree` when reviewing uncommitted working-tree edits against an already-indexed `HEAD` session (no `.rgctl-base/` required).
 
 **Sample (shape):**
 
@@ -769,15 +787,15 @@ rgctl cpg export --format graphson --output cpg.json [--path-contains src/] \
 
 ## serve
 
-**Command:** `rgctl serve [--open] [--host H] [--port N] [--dashboard-dir DIR] [--query-only|--dashboard-only] [--no-pipeline]`
+**Command:** `rgctl serve [--open] [--host H] [--port N] [--dashboard-dir DIR] [--query-only]`
 
-**Purpose:** Local HTTP dashboard + `POST /api/query` (and semantic routes) for **one repository**. Auto-runs `discover --full` unless `--no-pipeline`.
+**Purpose:** Local HTTP dashboard + `POST /api/query` (and semantic routes) for **one repository**. Serve-only — does **not** run discover; index first with `rgctl discover . --with-universe`.
 
-**Prerequisites:** `discover` (dashboard bundle with `--with-dashboard` for full UI).
+**Prerequisites:** `discover` (universe dashboard bundle with `--with-universe` for full UI).
 
 **Pitfalls:** Foreground only — binds until Ctrl+C. Not a multi-repo catalog. Agents usually prefer CLI `-f json` subprocesses over HTTP.
 
-**Agent should report:** URL/port for HTTP; note `--no-pipeline` if artifacts must exist first.
+**Agent should report:** URL/port for HTTP; confirm `discover --with-universe` (or equivalent) already produced `.rgctl/dashboard/`.
 
 ---
 
@@ -790,18 +808,6 @@ rgctl cpg export --format graphson --output cpg.json [--path-contains src/] \
 **Prerequisites:** Discoverable trees or prepared `.rgctl` artifacts for base/head.
 
 **Agent should report:** high-level added/removed/changed symbol counts; avoid dumping full edge lists.
-
----
-
-## rules / kantra
-
-**Command:** `rgctl discover . --with-kantra` then `rgctl rules …` (list / query Konveyor-style findings)
-
-**Purpose:** Run Kantra/rules analysis during discover; query findings afterward. Structural policy workflows that mention `kantra` should use this path (not ad-hoc scrapes).
-
-**Prerequisites:** `discover --with-kantra` writes findings under `.rgctl/`.
-
-**Agent should report:** findings path + top rule hits; pair with `migration_plan.json` when migrating.
 
 ---
 
