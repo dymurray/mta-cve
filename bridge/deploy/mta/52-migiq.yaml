@@ -17,7 +17,7 @@ spec:
     Builds migration prompts from the rgctl code graph and migration
     context (MigIQ phase 0).
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-prompt-builder
   tags: [migration, migiq]
 ---
@@ -35,7 +35,7 @@ spec:
     Creates comprehensive migration plans for application modernization
     projects.
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-plan
   tags: [migration, migiq]
 ---
@@ -52,7 +52,7 @@ spec:
   description: >-
     Executes migration plan tasks against the application source.
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-execute
   tags: [migration, migiq]
 ---
@@ -69,7 +69,7 @@ spec:
   description: >-
     Containerizes the migrated application.
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-containerize
   tags: [migration, migiq]
 ---
@@ -86,7 +86,7 @@ spec:
   description: >-
     Produces deployment artifacts for the migrated application.
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-deploy
   tags: [migration, migiq]
 ---
@@ -104,7 +104,7 @@ spec:
     MigIQ-specific code knowledge graph analysis using rgctl: indexing,
     graph artifact validation, and structure queries per MigIQ phase.
   type: skill
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: mig-rgctl
   tags: [migration, rgctl, migiq]
 ---
@@ -117,7 +117,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com
@@ -144,7 +144,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com
@@ -169,7 +169,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com
@@ -193,7 +193,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com

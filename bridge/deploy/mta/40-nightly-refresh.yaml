@@ -21,7 +21,7 @@ spec:
           restartPolicy: Never
           containers:
             - name: refresh
-              image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+              image: quay.io/dymurray/mta-rhtpa-bridge:latest
               imagePullPolicy: Always
               command: [/usr/bin/nightly-refresh]
               env:

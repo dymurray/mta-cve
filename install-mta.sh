@@ -4,7 +4,8 @@
 #
 #   1. the public MTA operator (channel 8.3) + Tackle CR with agentic enabled
 #   2. RHTPA 3.1 (RHBK + PostgreSQL + Helm chart + importers)
-#   3. the bridge, agent, skills and custom-UI images (in-cluster builds)
+#   3. the bridge, agent, skills and custom-UI images (prebuilt from
+#      quay.io/dymurray by default; BUILD_IMAGES=1 builds them in-cluster)
 #   4. the hub service account + token the bridge needs
 #   5. all Tasks/Addons/watchers/Agents/SkillCards/Gateway CRs
 #
@@ -16,8 +17,12 @@
 #
 # Usage: ./install-mta.sh
 #   MTA_CHANNEL=8.3        operator channel (default 8.3)
-#   UI_DIR=...             custom-UI checkout (auto-cloned if missing)
-#   HARNESS_SRC=...        harness checkout (auto-cloned if missing)
+#   IMAGE_REPO=...         registry holding the custom images
+#                          (default quay.io/dymurray)
+#   BUILD_IMAGES=1         build the custom images in-cluster from source
+#                          instead of pulling the prebuilt quay images
+#   UI_DIR=...             custom-UI checkout (BUILD_IMAGES; auto-cloned)
+#   HARNESS_SRC=...        harness checkout (BUILD_IMAGES; auto-cloned)
 #   SKIP_UI=1              keep the stock MTA UI
 #   STEP=n                 resume from step n (steps: 1 2 3 4 5)
 set -euo pipefail
@@ -69,20 +74,38 @@ run_step 1 "MTA operator + Tackle CR" bridge/hack/install-mta-operator.sh
 run_step 2 "RHTPA (RHBK, PostgreSQL, Helm chart, importers)" bridge/hack/install-rhtpa.sh
 
 # -------------------------------------------------------- step 3: images
-# Source checkouts for the custom UI and the agent harness, cloned from the
-# forks if not present. See README.md for the branch map.
-UI_DIR="${UI_DIR:-$ROOT/checkouts/mta-tackle2-ui}"
-HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$ROOT/checkouts/agentic-controller}"
-if [ "${SKIP_UI:-0}" != "1" ] && [ ! -d "$UI_DIR" ]; then
-  git clone --branch agentic-observability --depth 1 \
-    https://github.com/dymurray/tackle2-ui.git "$UI_DIR"
-fi
-if [ ! -d "$HARNESS_CHECKOUT" ]; then
-  git clone --branch harness-push-url --depth 1 \
-    https://github.com/dymurray/agentic-controller.git "$HARNESS_CHECKOUT"
-fi
+# By default the custom images are pulled prebuilt from $IMAGE_REPO
+# (quay.io/dymurray: mta-rhtpa-bridge, mta-cve-skills, agent-cve, mta-ui-cve)
+# — the deploy manifests reference them directly, so nothing is built
+# on-cluster. Set BUILD_IMAGES=1 to build them from source instead (requires
+# go and the forks below); that path is for developing the custom components
+# and overrides IMAGE_REPO to the internal registry.
+use_quay_images() {
+  echo "Using prebuilt images from $IMAGE_REPO (set BUILD_IMAGES=1 to build from source)."
+  # The bridge/skills/agent images are referenced by the deploy manifests
+  # (applied in step 5). The UI image is selected through the Tackle CR.
+  if [ "${SKIP_UI:-0}" != "1" ]; then
+    k -n "$MTA_NS" patch tackle mta --type merge \
+      -p "{\"spec\":{\"ui_image_fqin\":\"${IMAGE_REPO}/mta-ui-cve:latest\"}}"
+    echo "Tackle CR ui_image_fqin -> ${IMAGE_REPO}/mta-ui-cve:latest"
+  else
+    echo "SKIP_UI=1: keeping the stock MTA UI"
+  fi
+}
 
 image_builds() {
+  # Source checkouts for the custom UI and the agent harness, cloned from the
+  # forks if not present. See README.md for the branch map.
+  local UI_DIR="${UI_DIR:-$ROOT/checkouts/mta-tackle2-ui}"
+  local HARNESS_CHECKOUT="${HARNESS_CHECKOUT:-$ROOT/checkouts/agentic-controller}"
+  if [ "${SKIP_UI:-0}" != "1" ] && [ ! -d "$UI_DIR" ]; then
+    git clone --branch agentic-observability --depth 1 \
+      https://github.com/dymurray/tackle2-ui.git "$UI_DIR"
+  fi
+  if [ ! -d "$HARNESS_CHECKOUT" ]; then
+    git clone --branch harness-push-url --depth 1 \
+      https://github.com/dymurray/agentic-controller.git "$HARNESS_CHECKOUT"
+  fi
   k -n "$MTA_NS" apply -f "$BRIDGE_ROOT/deploy/build/buildconfigs.yaml"
   bridge/hack/build.sh
   bridge/hack/build-skills.sh
@@ -93,7 +116,15 @@ image_builds() {
     echo "SKIP_UI=1: keeping the stock MTA UI"
   fi
 }
-run_step 3 "images (bridge, skills, agent, UI)" image_builds
+
+if [ "${BUILD_IMAGES:-0}" = "1" ]; then
+  # Build into, and point every manifest at, the internal registry. Exported
+  # before the steps so a resumed run (STEP=5) still renders the right registry.
+  export IMAGE_REPO="image-registry.openshift-image-registry.svc:5000/$MTA_NS"
+  run_step 3 "images — build from source (bridge, skills, agent, UI)" image_builds
+else
+  run_step 3 "images — prebuilt from $IMAGE_REPO" use_quay_images
+fi
 
 # --------------------------------------------- step 4: hub service account
 run_step 4 "hub bridge token" bridge/hack/mint-hub-token.sh

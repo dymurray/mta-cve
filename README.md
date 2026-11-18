@@ -16,11 +16,14 @@ cd mta-cve
 
 One script brings up the whole environment on an OpenShift cluster you are
 cluster-admin on: the public MTA operator (channel 8.3, `agentic_enabled`), RHTPA 3.1,
-the bridge/agent/skills/UI images, and all CRs. Prerequisites: `oc`, `helm`, `jq`,
-`go`, `git`. Credentials are generated into `bridge/.secrets.env` (gitignored);
-`JIRA_URL`/`JIRA_EMAIL`/`JIRA_TOKEN` and `LLM_API_KEY` must be added by hand before
-installing — the installer tells you when. See `./install-mta.sh --help`-style header
-comments for `STEP=`, `SKIP_UI=`, `MTA_CHANNEL=`, `UI_DIR=`, `HARNESS_SRC=` knobs.
+the bridge/agent/skills/UI images, and all CRs. The four custom images are pulled
+prebuilt from `quay.io/dymurray` (see the table below), so no in-cluster build is
+needed; pass `BUILD_IMAGES=1` to build them from source instead. Prerequisites:
+`oc`, `helm`, `jq`, `git` (plus `go` only when `BUILD_IMAGES=1`). Credentials are
+generated into `bridge/.secrets.env` (gitignored); `JIRA_URL`/`JIRA_EMAIL`/`JIRA_TOKEN`
+and `LLM_API_KEY` must be added by hand before installing — the installer tells you
+when. See `./install-mta.sh`'s header comments for `STEP=`, `SKIP_UI=`, `MTA_CHANNEL=`,
+`BUILD_IMAGES=`, `IMAGE_REPO=`, `UI_DIR=`, `HARNESS_SRC=` knobs.
 
 Then: add `https://github.com/dymurray/mta-cve-demo.git` as an application in the MTA
 UI, tag it into the `konveyor-cves` archetype, and watch CVE-2022-42889 (auto-bump)
@@ -69,6 +72,27 @@ Upstream bases: the bridge's hub SDK is vendored from
 [migtools/mta-tackle2-hub@release-0.11](https://github.com/migtools/mta-tackle2-hub/tree/release-0.11)
 (MTA 8.3.x); the custom UI is based on
 [migtools/mta-tackle2-ui@release-0.11](https://github.com/migtools/mta-tackle2-ui/tree/release-0.11).
+
+### Published images
+
+The custom images are published to `quay.io/dymurray` so the installer can pull
+them prebuilt (`linux/amd64`) — no in-cluster build required. The deploy manifests
+reference these by default; `BUILD_IMAGES=1` builds them from source into the
+cluster's internal registry instead.
+
+| Image | Used by | Repo |
+|---|---|---|
+| `quay.io/dymurray/mta-rhtpa-bridge:latest` | cve-watcher, jira-watcher, nightly-refresh, Task/Addon images | [quay.io/dymurray/mta-rhtpa-bridge](https://quay.io/repository/dymurray/mta-rhtpa-bridge) |
+| `quay.io/dymurray/agent-cve:latest` | the Java/Go CVE agents (Agent CRs) | [quay.io/dymurray/agent-cve](https://quay.io/repository/dymurray/agent-cve) |
+| `quay.io/dymurray/mta-cve-skills:latest` | agent SkillCards (rgctl skill) | [quay.io/dymurray/mta-cve-skills](https://quay.io/repository/dymurray/mta-cve-skills) |
+| `quay.io/dymurray/mta-ui-cve:latest` | the custom MTA UI (Tackle CR `ui_image_fqin`) | [quay.io/dymurray/mta-ui-cve](https://quay.io/repository/dymurray/mta-ui-cve) |
+| `quay.io/dymurray/mta-hub-custom:latest` | the optional custom hub (`hack/build-hub.sh`; not installed by default) | [quay.io/dymurray/mta-hub-custom](https://quay.io/repository/dymurray/mta-hub-custom) |
+
+> These repositories must be **public** for a cluster to pull them at runtime
+> (Quay repo → Settings → Make Public), or add a quay pull secret to the
+> `openshift-mta` namespace. Refresh an image with
+> `skopeo copy docker://<internal-registry>/openshift-mta/<name>@<digest> docker://quay.io/dymurray/<name>:latest`
+> (or `BUILD_IMAGES=1` then re-mirror).
 
 ## Divergences from the live demo cluster
 

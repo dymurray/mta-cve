@@ -2,6 +2,11 @@
 # Builds the customized MTA hub in-cluster from ~/git/mta-tackle2-hub and
 # deploys it to deploy/mta-hub, pinned by digest.
 #
+# The custom hub is optional and not part of install-mta.sh (which uses the
+# stock hub). To deploy the prebuilt custom hub from quay instead of building
+# from source:
+#   kubectl -n openshift-mta set image deploy/mta-hub mta-hub=quay.io/dymurray/mta-hub-custom:latest
+#
 # Revert to the stock hub:
 #   kubectl -n openshift-mta set image deploy/mta-hub mta-hub=registry.redhat.io/mta/mta-hub-rhel9@sha256:76f433d71711b0c261da9eca6cc7174cff4aa8a99047edfed34d5a63949431f0
 set -euo pipefail

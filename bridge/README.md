@@ -134,8 +134,8 @@ Reset a finding (status `Failed`, attempts 0; retried after the next nightly ref
 
 ```
 kubectl -n openshift-mta run reset-$(date +%s) --rm -i --restart=Never \
-  --image=image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest \
-  --overrides='{"spec":{"containers":[{"name":"reset","image":"image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest","command":["/usr/bin/nightly-refresh","reset","--app","<app>","--cve","<CVE-ID>"],"envFrom":[{"secretRef":{"name":"hub-bridge-token"}}],"env":[{"name":"HUB_BASE_URL","value":"http://mta-hub.openshift-mta.svc:8080"}]}]}}'
+  --image=quay.io/dymurray/mta-rhtpa-bridge:latest \
+  --overrides='{"spec":{"containers":[{"name":"reset","image":"quay.io/dymurray/mta-rhtpa-bridge:latest","command":["/usr/bin/nightly-refresh","reset","--app","<app>","--cve","<CVE-ID>"],"envFrom":[{"secretRef":{"name":"hub-bridge-token"}}],"env":[{"name":"HUB_BASE_URL","value":"http://mta-hub.openshift-mta.svc:8080"}]}]}}'
 ```
 
 Watcher dry run (log decisions without dispatching):

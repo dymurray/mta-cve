@@ -27,5 +27,12 @@ k -n "$MTA_NS" create secret generic jira-credentials \
   --from-literal=JIRA_TOKEN="$JIRA_TOKEN" \
   --dry-run=client -o yaml | k apply -f -
 k apply -f deploy/networkpolicy.yaml
-k apply -f deploy/mta/
+# Render the deploy manifests through IMAGE_REPO so the same YAML works for the
+# prebuilt quay images (default) and the in-cluster build path. The manifests
+# ship with quay.io/dymurray refs; this rewrites them only when IMAGE_REPO
+# points elsewhere (e.g. the internal registry under BUILD_IMAGES=1).
+for f in deploy/mta/*.yaml; do
+  sed "s#quay.io/dymurray/#${IMAGE_REPO}/#g" "$f"
+  echo '---'
+done | k apply -f -
 k -n "$MTA_NS" rollout restart deploy/cve-watcher deploy/jira-watcher

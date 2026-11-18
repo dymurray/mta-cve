@@ -188,7 +188,18 @@ Known chart gotcha (handled by the script): with `storage.type: filesystem` the 
 migrate hook mounts PVC `storage` before Helm creates it — pre-create the PVC with Helm
 ownership metadata.
 
-### 2.4 Build the images
+### 2.4 Images
+
+By default the custom images are pulled prebuilt from `quay.io/dymurray`
+(`mta-rhtpa-bridge`, `agent-cve`, `mta-cve-skills`, `mta-ui-cve`) — the deploy
+manifests under `deploy/mta/` reference them directly, so nothing is built
+on-cluster. `install-mta.sh` step 3 only patches the Tackle CR `ui_image_fqin`
+to the quay UI image. `IMAGE_REPO` (default `quay.io/dymurray`, set in
+`hack/env.sh`) selects the registry; `setup-mta.sh` rewrites the manifests
+through it at apply time.
+
+To build from source instead, run `install-mta.sh` with `BUILD_IMAGES=1` (which
+sets `IMAGE_REPO` to the internal registry) or run the build scripts directly:
 
 ```bash
 bridge/hack/build.sh         # mta-rhtpa-bridge: sbom-discovery, cve-remediation, cve-watcher, jira-watcher, nightly-refresh
@@ -302,8 +313,8 @@ kubectl -n openshift-mta create job nightly-manual-$(date +%s) --from=cronjob/ni
 
 # reset one finding (retried after the next nightly refresh)
 kubectl -n openshift-mta run reset-$(date +%s) --rm -i --restart=Never \
-  --image=image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest \
-  --overrides='{"spec":{"containers":[{"name":"reset","image":"image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest","command":["/usr/bin/nightly-refresh","reset","--app","<app>","--cve","<CVE-ID>"],"envFrom":[{"secretRef":{"name":"hub-bridge-token"}}],"env":[{"name":"HUB_BASE_URL","value":"http://mta-hub.openshift-mta.svc:8080"}]}]}}'
+  --image=quay.io/dymurray/mta-rhtpa-bridge:latest \
+  --overrides='{"spec":{"containers":[{"name":"reset","image":"quay.io/dymurray/mta-rhtpa-bridge:latest","command":["/usr/bin/nightly-refresh","reset","--app","<app>","--cve","<CVE-ID>"],"envFrom":[{"secretRef":{"name":"hub-bridge-token"}}],"env":[{"name":"HUB_BASE_URL","value":"http://mta-hub.openshift-mta.svc:8080"}]}]}}'
 
 # watcher dry run
 kubectl -n openshift-mta set env deploy/cve-watcher DRY_RUN=true|false

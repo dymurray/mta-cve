@@ -19,7 +19,7 @@ spec:
   # rgctl repo skills/rgctl @ v0.4.21, vendored in images/skills with its
   # frontmatter made spec-conformant (the loader rejects upstream's
   # top-level rgctl-managed field).
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-cve-skills:latest
+  image: quay.io/dymurray/mta-cve-skills:latest
   subPath: rgctl
   version: 0.4.21
   tags: [analysis, rgctl, security]
@@ -206,7 +206,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com
@@ -243,7 +243,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com
@@ -288,7 +288,7 @@ metadata:
     app.kubernetes.io/managed-by: mta-rhtpa-bridge
     konveyor.io/managed: "true"
 spec:
-  image: image-registry.openshift-image-registry.svc:5000/openshift-mta/agent-cve:latest
+  image: quay.io/dymurray/agent-cve:latest
   gitConfig:
     userName: Dylan Murray
     userEmail: dymurray@redhat.com

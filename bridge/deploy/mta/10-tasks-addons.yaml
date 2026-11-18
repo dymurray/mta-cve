@@ -21,7 +21,7 @@ spec:
   task: sbom-discovery
   container:
     name: addon
-    image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+    image: quay.io/dymurray/mta-rhtpa-bridge:latest
     imagePullPolicy: Always
     command: [/usr/bin/sbom-discovery]
     env:
@@ -51,7 +51,7 @@ spec:
   task: cve-remediation
   container:
     name: addon
-    image: image-registry.openshift-image-registry.svc:5000/openshift-mta/mta-rhtpa-bridge:latest
+    image: quay.io/dymurray/mta-rhtpa-bridge:latest
     imagePullPolicy: Always
     command: [/usr/bin/cve-remediation]
     env:
